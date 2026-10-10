@@ -1,0 +1,295 @@
+/*
+  panel.css: Panelin GÖRÜNÜMÜ.
+  Renkler en üstte "değişken" olarak tanımlı; koyu tema için sadece bu
+  değişkenler değiştiriliyor. Sayfa telefonda da düzgün görünecek şekilde
+  ekran genişliğine göre sütun sayısını ayarlıyor.
+*/
+
+/* ---------- Renkler (açık tema) ---------- */
+:root {
+  color-scheme: light;
+  --zemin: #f3f4f6;
+  --kart: #ffffff;
+  --cizgi: #e2e5e9;
+  --metin: #1a1d21;
+  --soluk: #616b78;
+  --vurgu: #2457d6;
+  --vurgu-zemin: #e7eefc;
+  --vurgu-uzeri: #ffffff;
+  --iyi: #15803d;
+  --tehlike: #c62828;
+  --tehlike-zemin: #fdecec;
+  --uyari: #b45309;
+  --sicak: #e0592a;
+  --soguk: #0a7bbd;
+  --lamba: #f2b400;
+  --golge: 0 1px 2px rgb(0 0 0 / 0.05), 0 2px 8px rgb(0 0 0 / 0.04);
+}
+
+/* ---------- Renkler (koyu tema: sistem koyu moddaysa) ---------- */
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --zemin: #0f1215;
+    --kart: #171b20;
+    --cizgi: #2a3038;
+    --metin: #e7eaee;
+    --soluk: #9aa4b0;
+    --vurgu: #6d9bff;
+    --vurgu-zemin: #1c2a45;
+    --vurgu-uzeri: #0b1424;
+    --iyi: #4ade80;
+    --tehlike: #f87171;
+    --tehlike-zemin: #3a1717;
+    --uyari: #fbbf24;
+    --sicak: #ff8a5c;
+    --soguk: #4cb6f0;
+    --lamba: #ffd04d;
+    --golge: none;
+  }
+}
+
+/* ---------- Genel ---------- */
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 24px clamp(16px, 4vw, 40px) 40px;
+  background: var(--zemin);
+  color: var(--metin);
+  font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+h1 { margin: 0; font-size: 1.6rem; letter-spacing: -0.01em; }
+h2 { margin: 0; font-size: 0.95rem; font-weight: 600; }
+hr { border: 0; border-top: 1px solid var(--cizgi); margin: 18px 0 14px; }
+
+.soluk { color: var(--soluk); }
+.kucuk { font-size: 0.82rem; margin: 6px 0 0; }
+
+/* ---------- Üst başlık ---------- */
+.ust {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  max-width: 1200px;
+  margin: 0 auto 20px;
+}
+.alt-baslik { margin: 2px 0 0; color: var(--soluk); }
+
+.rozet {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--kart);
+  border: 1px solid var(--cizgi);
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+.nokta { width: 9px; height: 9px; border-radius: 50%; background: var(--soluk); }
+.rozet[data-durum="bagli"] .nokta { background: var(--iyi); }
+.rozet[data-durum="kopuk"] .nokta,
+.rozet[data-durum="hata"] .nokta { background: var(--tehlike); }
+.rozet[data-durum="baglaniyor"] .nokta { background: var(--uyari); }
+
+/* ---------- Kart ızgarası ---------- */
+.izgara {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+@media (min-width: 680px) {
+  .izgara { grid-template-columns: repeat(2, 1fr); }
+  .tam { grid-column: 1 / -1; }
+}
+@media (min-width: 1000px) {
+  .izgara { grid-template-columns: repeat(3, 1fr); }
+}
+
+.kart {
+  background: var(--kart);
+  border: 1px solid var(--cizgi);
+  border-radius: 14px;
+  padding: 18px 20px 20px;
+  box-shadow: var(--golge);
+  min-width: 0;
+}
+.kart-ust {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  color: var(--soluk);
+}
+.kart-ust h2 { color: var(--metin); }
+
+.etiket { color: var(--soluk); font-size: 0.85rem; }
+.satir-baslik { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+.durum-yazi { font-weight: 600; }
+.durum-yazi.buyuk { font-size: 1.25rem; }
+
+.cevrimdisi-etiket {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: var(--tehlike);
+  background: var(--tehlike-zemin);
+}
+
+/* ---------- Düğmeler ---------- */
+button { font: inherit; }
+
+.dugme, .segment button {
+  cursor: pointer;
+  border: 1px solid var(--cizgi);
+  background: var(--kart);
+  color: var(--metin);
+  border-radius: 9px;
+  padding: 8px 14px;
+  font-weight: 500;
+  transition: background 0.15s, border-color 0.15s;
+}
+.dugme:hover:not(:disabled), .segment button:hover:not(:disabled) { border-color: var(--soluk); }
+.dugme { width: 100%; margin-top: 12px; }
+.dugme.ana { background: var(--vurgu); border-color: var(--vurgu); color: var(--vurgu-uzeri); }
+.dugme.ana:hover:not(:disabled) { filter: brightness(1.08); }
+.dugme.sim { border-style: dashed; color: var(--soluk); }
+.kucuk-dugme { width: auto; margin: 0; padding: 4px 10px; font-size: 0.82rem; }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* Birbirine yapışık seçenek düğmeleri (Kapalı | Soğutma | Isıtma) */
+.segment { display: flex; margin-top: 10px; }
+.segment button { flex: 1; border-radius: 0; margin-left: -1px; padding: 8px 6px; }
+.segment button:first-child { border-radius: 9px 0 0 9px; margin-left: 0; }
+.segment button:last-child { border-radius: 0 9px 9px 0; }
+.segment button[aria-pressed="true"] {
+  background: var(--vurgu-zemin);
+  border-color: var(--vurgu);
+  color: var(--vurgu);
+  position: relative;
+  font-weight: 600;
+}
+
+/* ---------- İklim kartı ---------- */
+.iklim { display: flex; flex-wrap: wrap; gap: 24px; }
+.iklim-ozet { flex: 1 1 240px; max-width: 360px; }
+.grafik-alani { flex: 3 1 360px; min-width: 0; }
+
+.buyuk-deger { font-size: 3.2rem; font-weight: 650; line-height: 1; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.buyuk-deger .birim { font-size: 1.4rem; color: var(--soluk); margin-left: 4px; font-weight: 500; }
+.iklim-ozet .satir-baslik { margin-top: 18px; }
+
+#klima-durum[data-durum="sogutma"] { color: var(--soguk); }
+#klima-durum[data-durum="isitma"] { color: var(--sicak); }
+
+#sicaklik-grafik { display: block; width: 100%; height: 200px; }
+.g-izgara { stroke: var(--cizgi); stroke-width: 1; }
+.g-eksen-yazi { fill: var(--soluk); font-size: 11px; font-variant-numeric: tabular-nums; }
+.g-cizgi { fill: none; stroke: var(--sicak); stroke-width: 2.2; stroke-linejoin: round; stroke-linecap: round; }
+.g-alan { fill: var(--sicak); opacity: 0.1; }
+.g-esik { stroke: var(--soluk); stroke-width: 1; stroke-dasharray: 4 4; }
+/* Yazının etrafına kart renginde ince bir kenar: çizgilerin üstünde bile okunur */
+.g-esik-yazi { fill: var(--soluk); font-size: 11px; paint-order: stroke; stroke: var(--kart); stroke-width: 4px; stroke-linejoin: round; }
+.g-sogutma { fill: var(--soguk); opacity: 0.85; }
+.g-isitma { fill: var(--sicak); opacity: 0.85; }
+.g-bos { fill: var(--soluk); font-size: 13px; }
+
+.lejant { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 8px; font-size: 0.8rem; color: var(--soluk); }
+.lejant span { display: inline-flex; align-items: center; gap: 6px; }
+.lejant i { display: inline-block; }
+.lj-cizgi { width: 16px; height: 2px; background: var(--sicak); }
+.lj-blok { width: 12px; height: 6px; border-radius: 2px; }
+.lj-blok.sogutma { background: var(--soguk); }
+.lj-blok.isitma { background: var(--sicak); }
+.lj-esik { width: 16px; border-top: 1px dashed var(--soluk); }
+
+/* ---------- Aydınlatma kartı ---------- */
+.lamba-satiri { display: flex; align-items: center; gap: 16px; }
+.lamba {
+  flex: none;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: var(--cizgi);
+  transition: background 0.3s, box-shadow 0.3s;
+}
+.lamba[data-durum="acik"] {
+  background: var(--lamba);
+  box-shadow: 0 0 0 6px color-mix(in srgb, var(--lamba) 25%, transparent),
+              0 0 28px 6px color-mix(in srgb, var(--lamba) 45%, transparent);
+}
+#hareket-durum[data-durum="var"] { color: var(--uyari); }
+
+/* ---------- Güvenlik kartı ---------- */
+.alarm-kutu {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--cizgi);
+}
+.alarm-kutu[data-durum="kurulu"] { border-color: var(--uyari); }
+.alarm-kutu[data-durum="kurulu"] #alarm-durum { color: var(--uyari); }
+.alarm-kutu[data-durum="caliyor"] {
+  border-color: var(--tehlike);
+  background: var(--tehlike-zemin);
+  animation: alarm-nabiz 1s ease-in-out infinite;
+}
+.alarm-kutu[data-durum="caliyor"] #alarm-durum { color: var(--tehlike); }
+@keyframes alarm-nabiz {
+  50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--tehlike) 30%, transparent); }
+}
+#kapi-durum[data-durum="acik"] { color: var(--uyari); }
+
+/* ---------- Cihaz listesi ---------- */
+.cihaz-listesi { list-style: none; margin: 0; padding: 0; }
+.cihaz-listesi li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--cizgi);
+  font-size: 0.88rem;
+}
+.cihaz-listesi li:last-child { border-bottom: 0; }
+.cihaz-listesi .nokta { flex: none; }
+.cihaz-listesi .ad { flex: 1; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.82rem; overflow-wrap: anywhere; }
+.cihaz-listesi li[data-durum="cevrimici"] .nokta { background: var(--iyi); }
+.cihaz-listesi li[data-durum="cevrimdisi"] { color: var(--soluk); }
+
+/* ---------- Olay günlüğü ---------- */
+.gunluk-arac { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; font-size: 0.85rem; }
+.gunluk-arac label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+
+.gunluk-kap { max-height: 320px; overflow: auto; border: 1px solid var(--cizgi); border-radius: 10px; }
+.gunluk { list-style: none; margin: 0; padding: 0; font-size: 0.84rem; }
+.gunluk li {
+  display: grid;
+  grid-template-columns: 70px minmax(150px, 280px) 1fr;
+  gap: 12px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--cizgi);
+}
+.gunluk li:last-child { border-bottom: 0; }
+.gunluk time { color: var(--soluk); font-variant-numeric: tabular-nums; }
+.gunluk code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; overflow-wrap: anywhere; }
+.gunluk li[data-tur="komut"] { background: var(--vurgu-zemin); }
+.gunluk li[data-tur="komut"] .icerik { color: var(--vurgu); font-weight: 600; }
+.gunluk .kayitli { color: var(--soluk); font-size: 0.78rem; margin-left: 6px; }
+.gunluk .bos { display: block; color: var(--soluk); text-align: center; padding: 18px; }
+
+@media (max-width: 560px) {
+  .gunluk li { grid-template-columns: 60px 1fr; }
+  .gunluk li .icerik { grid-column: 2; }
+}

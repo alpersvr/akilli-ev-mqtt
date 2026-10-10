@@ -1,0 +1,136 @@
+<!doctype html>
+<!--
+  index.html: Panelin İSKELETİ (yapısı).
+  Sayfada hangi kartların, yazıların ve düğmelerin olduğunu tanımlar.
+  Görünüm panel.css'te, davranış (MQTT bağlantısı, düğmeler) panel.js'te.
+-->
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Akıllı Ev Paneli</title>
+  <link rel="stylesheet" href="panel.css">
+</head>
+<body>
+  <header class="ust">
+    <div>
+      <h1>Akıllı Ev</h1>
+      <p class="alt-baslik">MQTT izleme ve kontrol paneli</p>
+    </div>
+    <div id="broker-durum" class="rozet" data-durum="baglaniyor" role="status">
+      <span class="nokta"></span><span id="broker-metin">Bağlanıyor…</span>
+    </div>
+  </header>
+
+  <main class="izgara">
+    <!-- SALON İKLİMİ: sıcaklık, grafik, klima kontrolü -->
+    <section class="kart tam">
+      <div class="kart-ust">
+        <h2>Salon iklimi</h2>
+        <span class="cevrimdisi-etiket" data-cevrim="sicaklik" hidden>Sensör çevrimdışı</span>
+      </div>
+      <div class="iklim">
+        <div class="iklim-ozet">
+          <div class="buyuk-deger"><span id="sicaklik-deger">--</span><span class="birim">°C</span></div>
+          <p class="soluk kucuk" id="sicaklik-zaman">Veri bekleniyor…</p>
+
+          <div class="satir-baslik">
+            <span class="etiket">Klima</span>
+            <span id="klima-durum" class="durum-yazi">—</span>
+            <span class="cevrimdisi-etiket" data-cevrim="klima" hidden>Çevrimdışı</span>
+          </div>
+          <div class="segment" role="group" aria-label="Klima modu">
+            <button type="button" data-cihaz="klima" data-durum="kapali">Kapalı</button>
+            <button type="button" data-cihaz="klima" data-durum="sogutma">Soğutma</button>
+            <button type="button" data-cihaz="klima" data-durum="isitma">Isıtma</button>
+          </div>
+          <p class="soluk kucuk">Otomasyon, sıcaklık eşikleri aşılınca klimayı yeniden ayarlar.</p>
+        </div>
+
+        <div class="grafik-alani">
+          <svg id="sicaklik-grafik" role="img" aria-label="Son ölçümlerin sıcaklık grafiği"></svg>
+          <div class="lejant">
+            <span><i class="lj-cizgi"></i>Sıcaklık</span>
+            <span><i class="lj-blok sogutma"></i>Klima soğutuyor</span>
+            <span><i class="lj-blok isitma"></i>Klima ısıtıyor</span>
+            <span><i class="lj-esik"></i>Otomasyon eşiği</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- AYDINLATMA: lamba ve hareket sensörü -->
+    <section class="kart">
+      <div class="kart-ust"><h2>Aydınlatma</h2></div>
+      <div class="lamba-satiri">
+        <div id="lamba-gorsel" class="lamba" aria-hidden="true"></div>
+        <div>
+          <div class="satir-baslik">
+            <span class="etiket">Salon lambası</span>
+            <span class="cevrimdisi-etiket" data-cevrim="lamba" hidden>Çevrimdışı</span>
+          </div>
+          <div id="lamba-durum" class="durum-yazi buyuk">—</div>
+        </div>
+      </div>
+      <button type="button" id="lamba-dugme" class="dugme ana">Aç</button>
+
+      <hr>
+      <div class="satir-baslik">
+        <span class="etiket">Hareket</span>
+        <span id="hareket-durum" class="durum-yazi">—</span>
+        <span class="cevrimdisi-etiket" data-cevrim="hareket" hidden>Çevrimdışı</span>
+      </div>
+      <p class="soluk kucuk" id="hareket-zaman"></p>
+      <button type="button" class="dugme sim" data-sim="hareket">Hareket simüle et</button>
+    </section>
+
+    <!-- GÜVENLİK: alarm ve kapı sensörü -->
+    <section class="kart">
+      <div class="kart-ust"><h2>Güvenlik</h2></div>
+      <div id="alarm-kutu" class="alarm-kutu">
+        <span class="etiket">Alarm</span>
+        <span id="alarm-durum" class="durum-yazi buyuk">—</span>
+        <span class="cevrimdisi-etiket" data-cevrim="alarm" hidden>Çevrimdışı</span>
+      </div>
+      <div class="segment" role="group" aria-label="Alarm">
+        <button type="button" data-cihaz="alarm" data-durum="kurulu">Kur</button>
+        <button type="button" data-cihaz="alarm" data-durum="devre_disi">Devre dışı bırak</button>
+      </div>
+
+      <hr>
+      <div class="satir-baslik">
+        <span class="etiket">Giriş kapısı</span>
+        <span id="kapi-durum" class="durum-yazi">—</span>
+        <span class="cevrimdisi-etiket" data-cevrim="kapi" hidden>Çevrimdışı</span>
+      </div>
+      <button type="button" class="dugme sim" data-sim="kapi">Kapı açılmasını simüle et</button>
+    </section>
+
+    <!-- CİHAZLAR: ev/sistem/baglanti/# mesajlarından çevrimiçi listesi -->
+    <section class="kart">
+      <div class="kart-ust"><h2>Cihazlar</h2></div>
+      <ul id="cihaz-listesi" class="cihaz-listesi">
+        <li class="soluk">Henüz bilgi yok</li>
+      </ul>
+    </section>
+
+    <!-- OLAY GÜNLÜĞÜ: gelen tüm MQTT mesajları -->
+    <section class="kart tam">
+      <div class="kart-ust">
+        <h2>Olay günlüğü</h2>
+        <div class="gunluk-arac">
+          <label><input type="checkbox" id="sicaklik-goster"> Sıcaklık ölçümlerini göster</label>
+          <button type="button" id="gunluk-temizle" class="dugme kucuk-dugme">Temizle</button>
+        </div>
+      </div>
+      <div class="gunluk-kap">
+        <ol id="gunluk" class="gunluk"></ol>
+      </div>
+    </section>
+  </main>
+
+  <!-- Önce MQTT kütüphanesi, sonra bizim kodumuz yüklenir. -->
+  <script src="mqtt.min.js"></script>
+  <script src="panel.js"></script>
+</body>
+</html>
