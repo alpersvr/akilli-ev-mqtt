@@ -42,7 +42,7 @@ def broker_calisiyor_mu():
 
 def main():
     if not broker_calisiyor_mu():
-        print("HATA: Broker'a ulaşılamadı. Önce başka bir terminalde 'mosquitto -v' çalıştırın.")
+        print("HATA: Broker'a ulaşılamadı. Önce başka bir terminalde 'mosquitto -c mosquitto.conf -v' çalıştırın.")
         return
 
     klasor = Path(__file__).parent
