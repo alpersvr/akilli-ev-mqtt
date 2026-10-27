@@ -1,15 +1,16 @@
 # panel.py
 # ------------------------------------------------------------
-# İZLEME VE KONTROL PANELİNİ BAŞLATAN KÜÇÜK WEB SUNUCUSU
+# SMALL WEB SERVER THAT STARTS THE MONITORING AND CONTROL PANEL
 #
-# "panel/" klasöründeki web sayfasını http://localhost:8000 adresinde
-# yayınlar ve tarayıcıyı açar. Sunucunun MQTT ile bir ilgisi yoktur:
-# sayfa açıldıktan sonra tarayıcı Mosquitto'ya WebSocket ile KENDİSİ
-# bağlanır, yani panel de evdeki diğer cihazlar gibi bir MQTT istemcisidir.
+# Serves the web page in the "panel/" folder at http://localhost:8000
+# and opens the browser. The server has nothing to do with MQTT:
+# once the page is open, the browser connects to Mosquitto over
+# WebSocket ITSELF, so the panel is an MQTT client like every other
+# device in the home.
 #
-# Sunucunun tek ek görevi: ayarlar.py içindeki topic adlarını ve eşikleri
-# "/ayarlar.json" adresinden sayfaya vermek. Böylece ayarlar tek bir
-# yerde (ayarlar.py) kalır, JavaScript tarafında tekrar yazılmaz.
+# The server's only extra job: hand the topic names and thresholds in
+# config.py to the page at "/config.json". This keeps the settings in
+# one place (config.py) instead of repeating them in JavaScript.
 # ------------------------------------------------------------
 
 import functools
@@ -20,99 +21,99 @@ import webbrowser
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-import ayarlar
+import config
 
-PANEL_KLASORU = Path(__file__).parent / "panel"
+PANEL_FOLDER = Path(__file__).parent / "panel"
 
 
-def panel_ayarlari():
-    """Sayfanın ihtiyaç duyduğu ayarları sözlük olarak hazırlar."""
+def panel_config():
+    """Prepares the settings the page needs as a dict."""
     return {
-        "websocket_portu": ayarlar.WEBSOCKET_PORTU,
-        "qos": ayarlar.QOS,
-        "komut_eki": ayarlar.KOMUT_EKI,
-        "baglanti_topic_koku": ayarlar.BAGLANTI_TOPIC_KOKU,
-        "abone_topic": ayarlar.ABONE_TOPIC,
-        "topicler": {
-            "sicaklik": ayarlar.SICAKLIK_TOPIC,
-            "dis_sicaklik": ayarlar.DIS_SICAKLIK_TOPIC,
-            "hareket": ayarlar.HAREKET_TOPIC,
-            "kapi": ayarlar.KAPI_TOPIC,
-            "lamba": ayarlar.LAMBA_TOPIC,
-            "klima": ayarlar.KLIMA_TOPIC,
-            "alarm": ayarlar.ALARM_TOPIC,
+        "websocket_port": config.WEBSOCKET_PORT,
+        "qos": config.QOS,
+        "command_suffix": config.COMMAND_SUFFIX,
+        "connection_topic_root": config.CONNECTION_TOPIC_ROOT,
+        "subscribe_topic": config.SUBSCRIBE_TOPIC,
+        "topics": {
+            "temperature": config.TEMPERATURE_TOPIC,
+            "outdoor_temperature": config.OUTDOOR_TEMPERATURE_TOPIC,
+            "motion": config.MOTION_TOPIC,
+            "door": config.DOOR_TOPIC,
+            "lamp": config.LAMP_TOPIC,
+            "ac": config.AC_TOPIC,
+            "alarm": config.ALARM_TOPIC,
         },
-        "klima_esikleri": {
-            "sogutma_basla": ayarlar.KLIMA_SOGUTMA_BASLA,
-            "sogutma_dur": ayarlar.KLIMA_SOGUTMA_DUR,
-            "isitma_basla": ayarlar.KLIMA_ISITMA_BASLA,
-            "isitma_dur": ayarlar.KLIMA_ISITMA_DUR,
+        "ac_thresholds": {
+            "cooling_start": config.AC_COOLING_START,
+            "cooling_stop": config.AC_COOLING_STOP,
+            "heating_start": config.AC_HEATING_START,
+            "heating_stop": config.AC_HEATING_STOP,
         },
-        "lamba_kapanma_suresi": ayarlar.LAMBA_KAPANMA_SURESI,
+        "lamp_off_delay": config.LAMP_OFF_DELAY,
     }
 
 
-class PanelIstekIsleyici(SimpleHTTPRequestHandler):
-    """Tarayıcıdan gelen her istek için çağrılır."""
+class PanelRequestHandler(SimpleHTTPRequestHandler):
+    """Called for every request from the browser."""
 
     def do_GET(self):
-        if self.path == "/ayarlar.json":
-            govde = json.dumps(panel_ayarlari(), ensure_ascii=False).encode("utf-8")
+        if self.path == "/config.json":
+            body = json.dumps(panel_config(), ensure_ascii=False).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Length", str(len(govde)))
+            self.send_header("Content-Length", str(len(body)))
             self.end_headers()
-            self.wfile.write(govde)
+            self.wfile.write(body)
         else:
-            # Diğer her şey (index.html, panel.js...) panel/ klasöründen verilir.
+            # Everything else (index.html, panel.js...) is served from the panel/ folder.
             super().do_GET()
 
     def end_headers(self):
-        # Tarayıcı dosyaları önbellekte tutmasın: kodu değiştirince
-        # sayfayı yenilemek yeni hali göstermeye yetsin.
+        # Don't let the browser cache files: after changing the code,
+        # reloading the page is enough to see the new version.
         self.send_header("Cache-Control", "no-store")
         super().end_headers()
 
     def log_message(self, format, *args):
-        # Her isteği ekrana yazmasın (ekran temiz kalsın).
+        # Don't print every request (keeps the screen clean).
         pass
 
 
-def websocket_acik_mi():
+def websocket_open():
     try:
-        with socket.create_connection((ayarlar.BROKER_ADRESI, ayarlar.WEBSOCKET_PORTU), timeout=2):
+        with socket.create_connection((config.BROKER_HOST, config.WEBSOCKET_PORT), timeout=2):
             return True
     except OSError:
         return False
 
 
 def main():
-    if not websocket_acik_mi():
-        print(f"UYARI: Broker'ın WebSocket portuna ({ayarlar.WEBSOCKET_PORTU}) ulaşılamadı.\n"
-              f"       Mosquitto'yu proje ayarlarıyla başlattığınızdan emin olun:\n"
-              f"       mosquitto -c mosquitto.conf -v\n"
-              f"       (Panel yine açılacak ve broker gelince kendiliğinden bağlanacak.)\n")
+    if not websocket_open():
+        print(f"WARNING: Could not reach the broker's WebSocket port ({config.WEBSOCKET_PORT}).\n"
+              f"         Make sure Mosquitto was started with the project settings:\n"
+              f"         mosquitto -c mosquitto.conf -v\n"
+              f"         (The panel will still open and connect by itself once the broker is up.)\n")
 
-    isleyici = functools.partial(PanelIstekIsleyici, directory=str(PANEL_KLASORU))
+    handler = functools.partial(PanelRequestHandler, directory=str(PANEL_FOLDER))
     try:
-        sunucu = ThreadingHTTPServer(("localhost", ayarlar.PANEL_PORTU), isleyici)
+        server = ThreadingHTTPServer(("localhost", config.PANEL_PORT), handler)
     except OSError:
-        print(f"HATA: {ayarlar.PANEL_PORTU} portu kullanımda. Panel zaten açık olabilir.")
+        print(f"ERROR: Port {config.PANEL_PORT} is in use. The panel may already be open.")
         return
 
-    adres = f"http://localhost:{ayarlar.PANEL_PORTU}"
-    print(f"[PANEL] {adres} adresinde yayında. (Çıkış: Ctrl+C)")
+    url = f"http://localhost:{config.PANEL_PORT}"
+    print(f"[PANEL] Serving at {url}. (Quit: Ctrl+C)")
 
-    # "--tarayici-acma" verilirse tarayıcı otomatik açılmaz (test için).
-    if "--tarayici-acma" not in sys.argv:
-        webbrowser.open(adres)
+    # With "--no-browser" the browser is not opened automatically (for testing).
+    if "--no-browser" not in sys.argv:
+        webbrowser.open(url)
 
     try:
-        sunucu.serve_forever()
+        server.serve_forever()
     except KeyboardInterrupt:
-        print("\n[PANEL] Kapatılıyor...")
+        print("\n[PANEL] Shutting down...")
     finally:
-        sunucu.server_close()
+        server.server_close()
 
 
 if __name__ == "__main__":

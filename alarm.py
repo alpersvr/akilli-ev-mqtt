@@ -1,46 +1,47 @@
 # alarm.py
 # ------------------------------------------------------------
-# SANAL ALARM (Eyleyici)
+# VIRTUAL ALARM (Actuator)
 #
-# Üç durumu vardır:
-#   devre_disi : Alarm kapalı, hiçbir şeye tepki vermez
-#   kurulu     : Evden çıkılmış; kapı açılır veya hareket olursa
-#                otomasyon alarmı çaldırır
-#   caliyor    : Siren çalıyor; "devre_disi" komutu gelene kadar susmaz
+# It has three states:
+#   disarmed  : The alarm is off and reacts to nothing
+#   armed     : Nobody is home; if the door opens or motion is detected
+#               the automation triggers the alarm
+#   triggered : The siren is sounding; it won't stop until a
+#               "disarmed" command arrives
 #
-# Komut örneği (ev/giris/alarm/komut): {"durum": "kurulu"}
+# Command example (home/entrance/alarm/command): {"state": "armed"}
 # ------------------------------------------------------------
 
-import ayarlar
-from eyleyici import Eyleyici
+import config
+from actuator import Actuator
 
 
-class Alarm(Eyleyici):
+class Alarm(Actuator):
     """
-    Eyleyici sınıfının özel bir türü. Ondan farklı olarak,
-    çalarken ekrana birkaç saniyede bir siren uyarısı yazar.
+    A special kind of Actuator. Unlike the base class, it prints
+    a siren warning every few seconds while triggered.
     """
 
     def __init__(self):
         super().__init__(
-            cihaz_id="giris-alarm-01",
-            etiket="ALARM",
-            topic=ayarlar.ALARM_TOPIC,
-            gecerli_durumlar=["devre_disi", "kurulu", "caliyor"],
-            baslangic_durumu="devre_disi",
+            device_id="entrance-alarm-01",
+            label="ALARM",
+            topic=config.ALARM_TOPIC,
+            valid_states=["disarmed", "armed", "triggered"],
+            initial_state="disarmed",
         )
-        self.sayac = 0
+        self.counter = 0
 
-    def adim(self, client):
-        # Her saniye çağrılır; çalıyorsa 3 saniyede bir uyarı yaz.
-        if self.durum == "caliyor":
-            if self.sayac % 3 == 0:
-                print("[ALARM] *** SİREN ÇALIYOR! *** "
-                      "(susturmak için 'devre_disi' komutu gönderin)")
-            self.sayac += 1
+    def step(self, client):
+        # Called every second; while triggered, print a warning every 3 seconds.
+        if self.state == "triggered":
+            if self.counter % 3 == 0:
+                print("[ALARM] *** SIREN SOUNDING! *** "
+                      "(send a 'disarmed' command to silence it)")
+            self.counter += 1
         else:
-            self.sayac = 0
+            self.counter = 0
 
 
 if __name__ == "__main__":
-    Alarm().calistir()
+    Alarm().run()

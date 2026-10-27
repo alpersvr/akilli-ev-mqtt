@@ -1,215 +1,217 @@
 // panel.js
 // ------------------------------------------------------------
-// Panelin DAVRANIŞI.
+// The panel's BEHAVIOUR.
 //
-// Tarayıcı, Mosquitto'ya WebSocket üzerinden bağlanan bir MQTT
-// istemcisidir (tıpkı Python'daki cihazlar gibi):
-//   1. "ev/#" topic'ine abone olur, gelen mesajlarla ekranı günceller.
-//   2. Düğmelere basılınca "<cihaz topic'i>/komut" adresine komut yayınlar.
+// The browser is an MQTT client connecting to Mosquitto over
+// WebSocket (just like the Python devices):
+//   1. It subscribes to "home/#" and updates the screen with incoming messages.
+//   2. When a button is pressed it publishes a command to "<device topic>/command".
 //
-// Topic adları ve eşikler kodda tekrar yazılmaz; panel.py bunları
-// ayarlar.py'den okuyup "/ayarlar.json" adresinden verir.
+// Topic names and thresholds are not repeated in the code; panel.py
+// reads them from config.py and serves them at "/config.json".
 // ------------------------------------------------------------
 
 "use strict";
 
-// Ekranda gösterilecek Türkçe karşılıklar
-const GORUNEN_AD = {
-  acik: "Açık", kapali: "Kapalı",
-  sogutma: "Soğutma", isitma: "Isıtma",
-  devre_disi: "Devre dışı", kurulu: "Kurulu", caliyor: "ÇALIYOR!",
-  var: "Var", yok: "Yok",
-  cevrimici: "Çevrimiçi", cevrimdisi: "Çevrimdışı",
+// Labels shown on screen
+const DISPLAY_NAME = {
+  on: "On", off: "Off",
+  open: "Open", closed: "Closed",
+  cooling: "Cooling", heating: "Heating",
+  disarmed: "Disarmed", armed: "Armed", triggered: "TRIGGERED!",
+  detected: "Detected", clear: "Not detected",
+  online: "Online", offline: "Offline",
 };
 
-const GRAFIK_NOKTA_SAYISI = 90;   // Grafikte tutulacak ölçüm sayısı (2 sn arayla = 3 dk)
-const GUNLUK_SATIR_SAYISI = 150;  // Günlükte tutulacak en fazla satır
-const SIMULASYON_SURESI_MS = 4000; // Simüle edilen hareket/kapı olayının süresi
+const LOCALE = "en-GB";             // 24-hour clock, day/month dates
+const CHART_POINT_COUNT = 90;       // Readings kept in the chart (2 s apart = 3 min)
+const LOG_ROW_COUNT = 150;          // Max rows kept in the log
+const SIMULATION_DURATION_MS = 4000; // Duration of a simulated motion/door event
 
-let A = null;       // ayarlar.json içeriği
-let client = null;  // MQTT istemcisi
+let C = null;       // contents of config.json
+let client = null;  // MQTT client
 
-// Evin panelde bilinen son durumu (null = henüz haber gelmedi)
-const ev = {
-  sicaklik: null,
-  sicaklikZamani: null,
-  disSicaklik: null,
-  disSicaklikZamani: null,
-  gecmis: [],          // [{ v: sıcaklık, d: dış sıcaklık, k: klima durumu, t: ölçüm zamanı (ms) }]
-  klima: null,
-  lamba: null,
-  hareket: null,
-  hareketZamani: null, // Hareket durumunun son değiştiği an
-  kapi: null,
+// The home's last state known to the panel (null = no news yet)
+const home = {
+  temperature: null,
+  temperatureTime: null,
+  outdoorTemperature: null,
+  outdoorTemperatureTime: null,
+  history: [],         // [{ v: temperature, o: outdoor temperature, a: AC state, t: reading time (ms) }]
+  ac: null,
+  lamp: null,
+  motion: null,
+  motionTime: null,    // When the motion state last changed
+  door: null,
   alarm: null,
-  zamanlar: {},        // { klima: ms, lamba: ms, ... } durum mesajının cihazda üretildiği an
-  cihazlar: {},        // { cihaz_id: "cevrimici" | "cevrimdisi" }
-  topicCihaz: {},      // { topic: o topic'e yayın yapan cihaz_id }
+  times: {},           // { ac: ms, lamp: ms, ... } when the state message was produced on the device
+  devices: {},         // { device_id: "online" | "offline" }
+  topicDevice: {},     // { topic: device_id publishing to that topic }
 };
 
 const $ = (id) => document.getElementById(id);
-const ad = (durum) => GORUNEN_AD[durum] ?? durum ?? "—";
+const label = (state) => DISPLAY_NAME[state] ?? state ?? "—";
 
 // ============================================================
-// BAŞLANGIÇ
+// STARTUP
 // ============================================================
 
-async function basla() {
+async function start() {
   try {
-    const yanit = await fetch("ayarlar.json");
-    A = await yanit.json();
+    const response = await fetch("config.json");
+    C = await response.json();
   } catch {
-    brokerDurumu("hata", "ayarlar.json okunamadı. Paneli 'python panel.py' ile açın.");
+    brokerStatus("error", "Could not read config.json. Open the panel with 'python panel.py'.");
     return;
   }
 
-  dugmeleriBagla();
-  ciz();
-  gunlukBosMu();
-  baglan();
+  bindButtons();
+  render();
+  showEmptyLog();
+  connect();
 
-  // Her saniye "x sn önce" yazılarını güncelle
-  setInterval(sureleriGuncelle, 1000);
-  // Pencere boyutu değişince grafiği yeniden çiz
-  new ResizeObserver(grafikCiz).observe($("sicaklik-grafik"));
+  // Update the "x s ago" texts every second
+  setInterval(updateTimes, 1000);
+  // Redraw the chart when the window is resized
+  new ResizeObserver(drawChart).observe($("temperature-chart"));
 }
 
 // ============================================================
-// MQTT BAĞLANTISI
+// MQTT CONNECTION
 // ============================================================
 
-function baglan() {
-  // Sayfa hangi bilgisayardan açıldıysa broker'ın da orada olduğunu varsayıyoruz.
-  const adres = `ws://${location.hostname || "localhost"}:${A.websocket_portu}`;
+function connect() {
+  // We assume the broker is on whichever computer the page was opened from.
+  const url = `ws://${location.hostname || "localhost"}:${C.websocket_port}`;
 
-  client = mqtt.connect(adres, {
-    // Her sekme kendine özel bir kimlik alır (aynı kimlik broker'da çakışırdı).
+  client = mqtt.connect(url, {
+    // Each tab gets its own ID (identical IDs would collide on the broker).
     clientId: "panel-" + Math.random().toString(16).slice(2, 8),
     clean: true,
-    reconnectPeriod: 2000,  // Bağlantı koparsa 2 sn'de bir yeniden dene
+    reconnectPeriod: 2000,  // If the connection drops, retry every 2 s
     connectTimeout: 5000,
   });
 
   client.on("connect", () => {
-    brokerDurumu("bagli", "Broker'a bağlı");
-    client.subscribe(A.abone_topic, { qos: A.qos });
+    brokerStatus("connected", "Connected to broker");
+    client.subscribe(C.subscribe_topic, { qos: C.qos });
   });
-  client.on("reconnect", () => brokerDurumu("baglaniyor", "Yeniden bağlanıyor…"));
-  client.on("close", () => brokerDurumu("kopuk", "Broker bağlantısı yok"));
-  client.on("message", mesajGeldi);
+  client.on("reconnect", () => brokerStatus("connecting", "Reconnecting…"));
+  client.on("close", () => brokerStatus("disconnected", "No broker connection"));
+  client.on("message", onMessage);
 }
 
-function brokerDurumu(durum, metin) {
-  $("broker-durum").dataset.durum = durum;
-  $("broker-metin").textContent = metin;
-  // Bağlantı yokken komut düğmeleri kullanılamaz
-  document.querySelectorAll("button[data-cihaz], #lamba-dugme, button[data-sim]")
-    .forEach((d) => { d.disabled = durum !== "bagli"; });
+function brokerStatus(state, text) {
+  $("broker-status").dataset.state = state;
+  $("broker-text").textContent = text;
+  // Command buttons can't be used without a connection
+  document.querySelectorAll("button[data-device], #lamp-button, button[data-sim]")
+    .forEach((b) => { b.disabled = state !== "connected"; });
 }
 
-/** Bir eyleyiciye komut gönderir, ör. komutGonder("lamba", "acik") */
-function komutGonder(cihaz, durum) {
-  const topic = A.topicler[cihaz] + A.komut_eki;
-  yayinla(topic, { durum, kaynak: "panel" });
+/** Sends a command to an actuator, e.g. sendCommand("lamp", "on") */
+function sendCommand(device, state) {
+  const topic = C.topics[device] + C.command_suffix;
+  publish(topic, { state, source: "panel" });
 }
 
-function yayinla(topic, veri) {
+function publish(topic, data) {
   if (!client?.connected) return;
-  const mesaj = JSON.stringify({ ...veri, zaman: zamanDamgasi() });
-  client.publish(topic, mesaj, { qos: A.qos });
+  const message = JSON.stringify({ ...data, timestamp: timestamp() });
+  client.publish(topic, message, { qos: C.qos });
 }
 
 /**
- * Bir sensör olayını taklit eder: önce "aktif" durumu, birkaç saniye sonra
- * "pasif" durumu yayınlar. Gerçek sensörün yapacağı mesajın aynısıdır;
- * otomasyon da bunu gerçek bir olay gibi işler.
+ * Imitates a sensor event: publishes the "active" state first and the
+ * "idle" state a few seconds later. It's the same message the real sensor
+ * would send; the automation handles it like a real event.
  */
-function simuleEt(dugme, sensor, aktif, pasif) {
-  const topic = A.topicler[sensor];
-  yayinla(topic, { durum: aktif, kaynak: "panel-simulasyon" });
-  dugme.disabled = true;
+function simulate(button, sensor, active, idle) {
+  const topic = C.topics[sensor];
+  publish(topic, { state: active, source: "panel-simulation" });
+  button.disabled = true;
   setTimeout(() => {
-    yayinla(topic, { durum: pasif, kaynak: "panel-simulasyon" });
-    dugme.disabled = !client?.connected;
-  }, SIMULASYON_SURESI_MS);
+    publish(topic, { state: idle, source: "panel-simulation" });
+    button.disabled = !client?.connected;
+  }, SIMULATION_DURATION_MS);
 }
 
 // ============================================================
-// GELEN MESAJLAR
+// INCOMING MESSAGES
 // ============================================================
 
-function mesajGeldi(topic, payload, paket) {
-  const metin = new TextDecoder().decode(payload);
-  const veri = jsonCoz(metin);
-  // paket.retain = true ise broker'ın sakladığı "son bilinen durum" mesajıdır
-  gunlugeEkle(topic, metin, veri, paket.retain);
+function onMessage(topic, payload, packet) {
+  const text = new TextDecoder().decode(payload);
+  const data = parseJson(text);
+  // packet.retain = true means this is the "last known state" kept by the broker
+  addToLog(topic, text, data, packet.retain);
 
-  // Bağlantı bilgisi: ev/sistem/baglanti/<cihaz_id>  ->  "cevrimici" / "cevrimdisi"
-  const kok = A.baglanti_topic_koku + "/";
-  if (topic.startsWith(kok)) {
-    ev.cihazlar[topic.slice(kok.length)] = metin;
-    cihazlariCiz();
-    cevrimDurumlariniCiz();
+  // Connection info: home/system/connection/<device_id>  ->  "online" / "offline"
+  const root = C.connection_topic_root + "/";
+  if (topic.startsWith(root)) {
+    home.devices[topic.slice(root.length)] = text;
+    renderDevices();
+    renderOnlineTags();
     return;
   }
 
-  if (!veri || topic.endsWith(A.komut_eki)) return;  // Komutlar sadece günlüğe yazılır
+  if (!data || topic.endsWith(C.command_suffix)) return;  // Commands are only logged
 
-  // Bu topic'e hangi cihazın yayın yaptığını not et (çevrimdışı uyarısı için)
-  if (veri.cihaz_id) ev.topicCihaz[topic] = veri.cihaz_id;
+  // Note which device publishes to this topic (for the offline warning)
+  if (data.device_id) home.topicDevice[topic] = data.device_id;
 
-  // Mesajın cihazda üretildiği an (yoksa geliş anı). Kayıtlı (retain)
-  // mesajlarda bu, sayfanın açıldığı an değil, durumun gerçekten değiştiği andır.
-  const zaman = mesajZamani(veri);
+  // When the message was produced on the device (or arrival time if missing).
+  // For retained messages this is when the state really changed, not when the page opened.
+  const time = messageTime(data);
 
-  const T = A.topicler;
+  const T = C.topics;
   switch (topic) {
-    case T.sicaklik:
-      if (typeof veri.sicaklik !== "number") return;
-      ev.sicaklik = veri.sicaklik;
-      ev.sicaklikZamani = zaman;
-      ev.gecmis.push({ v: veri.sicaklik, d: ev.disSicaklik, k: ev.klima, t: zaman });
-      if (ev.gecmis.length > GRAFIK_NOKTA_SAYISI) ev.gecmis.shift();
+    case T.temperature:
+      if (typeof data.temperature !== "number") return;
+      home.temperature = data.temperature;
+      home.temperatureTime = time;
+      home.history.push({ v: data.temperature, o: home.outdoorTemperature, a: home.ac, t: time });
+      if (home.history.length > CHART_POINT_COUNT) home.history.shift();
       break;
-    case T.dis_sicaklik:
-      if (typeof veri.sicaklik !== "number") return;
-      ev.disSicaklik = veri.sicaklik;
-      ev.disSicaklikZamani = zaman;
+    case T.outdoor_temperature:
+      if (typeof data.temperature !== "number") return;
+      home.outdoorTemperature = data.temperature;
+      home.outdoorTemperatureTime = time;
       break;
-    case T.klima:  ev.klima = veri.durum; ev.zamanlar.klima = zaman; break;
-    case T.lamba:  ev.lamba = veri.durum; ev.zamanlar.lamba = zaman; break;
-    case T.kapi:   ev.kapi = veri.durum;  ev.zamanlar.kapi = zaman;  break;
-    case T.alarm:  ev.alarm = veri.durum; ev.zamanlar.alarm = zaman; break;
-    case T.hareket:
-      // Kayıtlı mesajın zamanı da gerçek değişim anıdır; sayfa yeni açılınca da gösterilebilir
-      if (veri.durum !== ev.hareket) ev.hareketZamani = zaman;
-      ev.hareket = veri.durum;
+    case T.ac:    home.ac = data.state;    home.times.ac = time;    break;
+    case T.lamp:  home.lamp = data.state;  home.times.lamp = time;  break;
+    case T.door:  home.door = data.state;  home.times.door = time;  break;
+    case T.alarm: home.alarm = data.state; home.times.alarm = time; break;
+    case T.motion:
+      // A retained message's time is the real change time too, so it can be shown right after the page opens
+      if (data.state !== home.motion) home.motionTime = time;
+      home.motion = data.state;
       break;
     default:
       return;
   }
-  ciz();
-  cevrimDurumlariniCiz();
+  render();
+  renderOnlineTags();
 }
 
-/** Mesajdaki "zaman" alanını (ör. 2026-10-10T16:10:46) milisaniyeye çevirir. */
-function mesajZamani(veri) {
-  // Saat dilimi yazmayan ISO metni tarayıcı yerel saat olarak yorumlar (Python tarafı da yerel saat)
-  const ms = typeof veri?.zaman === "string" ? Date.parse(veri.zaman) : NaN;
+/** Converts the message's "timestamp" field (e.g. 2026-10-10T16:10:46) to milliseconds. */
+function messageTime(data) {
+  // The browser reads an ISO string without a time zone as local time (the Python side uses local time too)
+  const ms = typeof data?.timestamp === "string" ? Date.parse(data.timestamp) : NaN;
   return Number.isNaN(ms) ? Date.now() : ms;
 }
 
-/** ms -> "16:10:46"; bugün değilse başına gün.ay eklenir: "10.10 16:10:46" */
-function saatYaz(ms) {
+/** ms -> "16:10:46"; if not today, day/month is prefixed: "10/10 16:10:46" */
+function formatTime(ms) {
   const t = new Date(ms);
-  const saat = t.toLocaleTimeString("tr-TR");
-  if (t.toDateString() === new Date().toDateString()) return saat;
-  return t.toLocaleDateString("tr-TR", { day: "2-digit", month: "2-digit" }) + " " + saat;
+  const clock = t.toLocaleTimeString(LOCALE);
+  if (t.toDateString() === new Date().toDateString()) return clock;
+  return t.toLocaleDateString(LOCALE, { day: "2-digit", month: "2-digit" }) + " " + clock;
 }
 
-function jsonCoz(metin) {
+function parseJson(text) {
   try {
-    const v = JSON.parse(metin);
+    const v = JSON.parse(text);
     return v && typeof v === "object" && !Array.isArray(v) ? v : null;
   } catch {
     return null;
@@ -217,279 +219,280 @@ function jsonCoz(metin) {
 }
 
 // ============================================================
-// EKRANI GÜNCELLEME
+// UPDATING THE SCREEN
 // ============================================================
 
-function ciz() {
-  // Sıcaklık ve klima
-  $("sicaklik-deger").textContent = ev.sicaklik === null ? "--" : ev.sicaklik.toFixed(1);
-  $("dis-sicaklik-deger").textContent = ev.disSicaklik === null ? "--" : ev.disSicaklik.toFixed(1);
-  durumYaz("klima-durum", ev.klima);
-  segmentiIsaretle("klima", ev.klima);
+function render() {
+  // Temperature and AC
+  $("temperature-value").textContent = home.temperature === null ? "--" : home.temperature.toFixed(1);
+  $("outdoor-temperature-value").textContent =
+    home.outdoorTemperature === null ? "--" : home.outdoorTemperature.toFixed(1);
+  writeState("ac-state", home.ac);
+  markSegment("ac", home.ac);
 
-  // Lamba
-  $("lamba-gorsel").dataset.durum = ev.lamba ?? "";
-  durumYaz("lamba-durum", ev.lamba);
-  $("lamba-dugme").textContent = ev.lamba === "acik" ? "Lambayı kapat" : "Lambayı aç";
+  // Lamp
+  $("lamp-visual").dataset.state = home.lamp ?? "";
+  writeState("lamp-state", home.lamp);
+  $("lamp-button").textContent = home.lamp === "on" ? "Turn lamp off" : "Turn lamp on";
 
-  // Hareket ve kapı
-  durumYaz("hareket-durum", ev.hareket);
-  durumYaz("kapi-durum", ev.kapi);
+  // Motion and door
+  writeState("motion-state", home.motion);
+  writeState("door-state", home.door);
 
   // Alarm
-  $("alarm-kutu").dataset.durum = ev.alarm ?? "";
-  durumYaz("alarm-durum", ev.alarm);
-  segmentiIsaretle("alarm", ev.alarm);
+  $("alarm-box").dataset.state = home.alarm ?? "";
+  writeState("alarm-state", home.alarm);
+  markSegment("alarm", home.alarm);
 
-  sureleriGuncelle();
-  grafikCiz();
+  updateTimes();
+  drawChart();
 }
 
-function durumYaz(id, durum) {
+function writeState(id, state) {
   const el = $(id);
-  el.textContent = ad(durum);
-  el.dataset.durum = durum ?? "";
+  el.textContent = label(state);
+  el.dataset.state = state ?? "";
 }
 
-/** Seçenek düğmelerinden mevcut duruma karşılık geleni "basılı" gösterir. */
-function segmentiIsaretle(cihaz, durum) {
-  document.querySelectorAll(`button[data-cihaz="${cihaz}"]`).forEach((d) => {
-    d.setAttribute("aria-pressed", String(d.dataset.durum === durum));
+/** Shows the option button matching the current state as "pressed". */
+function markSegment(device, state) {
+  document.querySelectorAll(`button[data-device="${device}"]`).forEach((b) => {
+    b.setAttribute("aria-pressed", String(b.dataset.state === state));
   });
 }
 
-function sureleriGuncelle() {
-  $("sicaklik-zaman").textContent = ev.sicaklikZamani
-    ? `Son ölçüm ${saatYaz(ev.sicaklikZamani)} · ${kacSaniyeOnce(ev.sicaklikZamani)}`
-    : "Veri bekleniyor…";
-  $("dis-sicaklik-zaman").textContent = ev.disSicaklikZamani
-    ? `Son ölçüm ${saatYaz(ev.disSicaklikZamani)} · ${kacSaniyeOnce(ev.disSicaklikZamani)}`
+function updateTimes() {
+  $("temperature-time").textContent = home.temperatureTime
+    ? `Last reading ${formatTime(home.temperatureTime)} · ${timeAgo(home.temperatureTime)}`
+    : "Waiting for data…";
+  $("outdoor-temperature-time").textContent = home.outdoorTemperatureTime
+    ? `Last reading ${formatTime(home.outdoorTemperatureTime)} · ${timeAgo(home.outdoorTemperatureTime)}`
     : "";
 
-  // Eyleyici ve kapı kartlarındaki "son değişim" satırları
-  document.querySelectorAll("[data-zaman]").forEach((el) => {
-    const z = ev.zamanlar[el.dataset.zaman];
-    el.textContent = z ? `Son güncelleme ${saatYaz(z)} · ${kacSaniyeOnce(z)}` : "";
+  // "Last update" lines on the actuator and door cards
+  document.querySelectorAll("[data-time]").forEach((el) => {
+    const t = home.times[el.dataset.time];
+    el.textContent = t ? `Last update ${formatTime(t)} · ${timeAgo(t)}` : "";
   });
 
-  let hareketMetni = "";
-  if (ev.hareketZamani && ev.hareket === "var") {
-    hareketMetni = `${saatYaz(ev.hareketZamani)} · ${kacSaniyeOnce(ev.hareketZamani)} başladı`;
-  } else if (ev.hareketZamani && ev.hareket === "yok") {
-    const kalan = A.lamba_kapanma_suresi - Math.floor((Date.now() - ev.hareketZamani) / 1000);
-    hareketMetni = `Son hareket ${saatYaz(ev.hareketZamani)} · ${kacSaniyeOnce(ev.hareketZamani)}`;
-    if (ev.lamba === "acik" && kalan > 0) hareketMetni += ` · lamba ~${kalan} sn sonra kapanacak`;
+  let motionText = "";
+  if (home.motionTime && home.motion === "detected") {
+    motionText = `Started ${formatTime(home.motionTime)} · ${timeAgo(home.motionTime)}`;
+  } else if (home.motionTime && home.motion === "clear") {
+    const left = C.lamp_off_delay - Math.floor((Date.now() - home.motionTime) / 1000);
+    motionText = `Last motion ${formatTime(home.motionTime)} · ${timeAgo(home.motionTime)}`;
+    if (home.lamp === "on" && left > 0) motionText += ` · lamp turns off in ~${left} s`;
   }
-  $("hareket-zaman").textContent = hareketMetni;
+  $("motion-time").textContent = motionText;
 }
 
-function kacSaniyeOnce(zaman) {
-  const sn = Math.max(0, Math.round((Date.now() - zaman) / 1000));
-  if (sn < 2) return "az önce";
-  if (sn < 60) return `${sn} sn önce`;
-  if (sn < 3600) return `${Math.floor(sn / 60)} dk önce`;
-  if (sn < 86400) return `${Math.floor(sn / 3600)} sa önce`;
-  return `${Math.floor(sn / 86400)} gün önce`;
+function timeAgo(time) {
+  const s = Math.max(0, Math.round((Date.now() - time) / 1000));
+  if (s < 2) return "just now";
+  if (s < 60) return `${s} s ago`;
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
+  return `${Math.floor(s / 86400)} days ago`;
 }
 
-/** Bir sensör/cihaz çevrimdışıysa kartındaki küçük kırmızı etiketi gösterir. */
-function cevrimDurumlariniCiz() {
-  document.querySelectorAll("[data-cevrim]").forEach((el) => {
-    const cihazId = ev.topicCihaz[A.topicler[el.dataset.cevrim]];
-    el.hidden = !(cihazId && ev.cihazlar[cihazId] === "cevrimdisi");
+/** If a sensor/device is offline, shows the small red tag on its card. */
+function renderOnlineTags() {
+  document.querySelectorAll("[data-online]").forEach((el) => {
+    const deviceId = home.topicDevice[C.topics[el.dataset.online]];
+    el.hidden = !(deviceId && home.devices[deviceId] === "offline");
   });
 }
 
-function cihazlariCiz() {
-  const liste = $("cihaz-listesi");
-  const idler = Object.keys(ev.cihazlar).sort();
-  liste.replaceChildren(...idler.map((id) => {
+function renderDevices() {
+  const list = $("device-list");
+  const ids = Object.keys(home.devices).sort();
+  list.replaceChildren(...ids.map((id) => {
     const li = document.createElement("li");
-    li.dataset.durum = ev.cihazlar[id];
-    li.innerHTML = `<span class="nokta"></span><span class="ad"></span><span class="durum"></span>`;
-    li.querySelector(".ad").textContent = id;
-    li.querySelector(".durum").textContent = ad(ev.cihazlar[id]);
+    li.dataset.state = home.devices[id];
+    li.innerHTML = `<span class="dot"></span><span class="name"></span><span class="state"></span>`;
+    li.querySelector(".name").textContent = id;
+    li.querySelector(".state").textContent = label(home.devices[id]);
     return li;
   }));
 }
 
 // ============================================================
-// SICAKLIK GRAFİĞİ (kütüphanesiz, elle çizilen SVG)
+// TEMPERATURE CHART (hand-drawn SVG, no library)
 // ============================================================
 
-function grafikCiz() {
-  const svg = $("sicaklik-grafik");
-  const g = svg.clientWidth, y = svg.clientHeight;  // genişlik, yükseklik (piksel)
-  if (!g || !A) return;
-  svg.setAttribute("viewBox", `0 0 ${g} ${y}`);
+function drawChart() {
+  const svg = $("temperature-chart");
+  const w = svg.clientWidth, h = svg.clientHeight;  // width, height (pixels)
+  if (!w || !C) return;
+  svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
 
-  const pay = { sol: 34, sag: 8, ust: 10, alt: 30 };  // kenar boşlukları (altta saat yazıları)
-  const cizimG = g - pay.sol - pay.sag;
-  const cizimY = y - pay.ust - pay.alt;
-  const E = A.klima_esikleri;
-  const degerler = ev.gecmis.map((n) => n.v);
-  const disDegerler = ev.gecmis.map((n) => n.d).filter((v) => typeof v === "number");
+  const pad = { left: 34, right: 8, top: 10, bottom: 30 };  // margins (time labels at the bottom)
+  const plotW = w - pad.left - pad.right;
+  const plotH = h - pad.top - pad.bottom;
+  const E = C.ac_thresholds;
+  const values = home.history.map((n) => n.v);
+  const outdoorValues = home.history.map((n) => n.o).filter((v) => typeof v === "number");
 
-  if (degerler.length < 2) {
-    svg.innerHTML = `<text class="g-bos" x="${g / 2}" y="${y / 2}" text-anchor="middle">Grafik için ölçümler bekleniyor…</text>`;
+  if (values.length < 2) {
+    svg.innerHTML = `<text class="g-empty" x="${w / 2}" y="${h / 2}" text-anchor="middle">Waiting for readings to draw the chart…</text>`;
     return;
   }
 
-  // Dikey eksen aralığı: veriyi, dış sıcaklığı ve soğutma eşiklerini kapsasın
-  const enAz = Math.floor(Math.min(...degerler, ...disDegerler, E.sogutma_dur) - 0.5);
-  const enCok = Math.ceil(Math.max(...degerler, ...disDegerler, E.sogutma_basla) + 0.5);
-  const yKoord = (v) => pay.ust + cizimY * (1 - (v - enAz) / (enCok - enAz));
-  const xKoord = (i) => pay.sol + (cizimG * i) / (GRAFIK_NOKTA_SAYISI - 1);
+  // Vertical axis range: cover the data, the outdoor temperature and the cooling thresholds
+  const min = Math.floor(Math.min(...values, ...outdoorValues, E.cooling_stop) - 0.5);
+  const max = Math.ceil(Math.max(...values, ...outdoorValues, E.cooling_start) + 0.5);
+  const yPos = (v) => pad.top + plotH * (1 - (v - min) / (max - min));
+  const xPos = (i) => pad.left + (plotW * i) / (CHART_POINT_COUNT - 1);
 
   let s = "";
 
-  // Yatay ızgara çizgileri ve sol eksen yazıları
-  const adim = enCok - enAz > 8 ? 2 : 1;
-  for (let v = enAz; v <= enCok; v += adim) {
-    s += `<line class="g-izgara" x1="${pay.sol}" x2="${pay.sol + cizimG}" y1="${yKoord(v)}" y2="${yKoord(v)}"/>`;
-    s += `<text class="g-eksen-yazi" x="${pay.sol - 6}" y="${yKoord(v) + 4}" text-anchor="end">${v}°</text>`;
+  // Horizontal grid lines and left axis labels
+  const step = max - min > 8 ? 2 : 1;
+  for (let v = min; v <= max; v += step) {
+    s += `<line class="g-grid" x1="${pad.left}" x2="${pad.left + plotW}" y1="${yPos(v)}" y2="${yPos(v)}"/>`;
+    s += `<text class="g-axis-text" x="${pad.left - 6}" y="${yPos(v) + 4}" text-anchor="end">${v}°</text>`;
   }
 
-  // Otomasyon eşikleri (aralık içinde kalanlar)
-  const esikler = [
-    [E.sogutma_basla, "soğutma başlar"], [E.sogutma_dur, "soğutma durur"],
-    [E.isitma_basla, "ısıtma başlar"], [E.isitma_dur, "ısıtma durur"],
+  // Automation thresholds (those within range)
+  const thresholds = [
+    [E.cooling_start, "cooling starts"], [E.cooling_stop, "cooling stops"],
+    [E.heating_start, "heating starts"], [E.heating_stop, "heating stops"],
   ];
-  for (const [v, yazi] of esikler) {
-    if (v < enAz || v > enCok) continue;
-    s += `<line class="g-esik" x1="${pay.sol}" x2="${pay.sol + cizimG}" y1="${yKoord(v)}" y2="${yKoord(v)}"/>`;
+  for (const [v] of thresholds) {
+    if (v < min || v > max) continue;
+    s += `<line class="g-threshold" x1="${pad.left}" x2="${pad.left + plotW}" y1="${yPos(v)}" y2="${yPos(v)}"/>`;
   }
 
-  // Eşik yazıları ayrı bir değişkende toplanır ve en son eklenir.
-  // SVG'de sonra çizilen üstte görünür; böylece veri çizgisi yazıyı örtmez.
-  let ustKatman = "";
-  for (const [v, yazi] of esikler) {
-    if (v < enAz || v > enCok) continue;
-    ustKatman += `<text class="g-esik-yazi" x="${pay.sol + 6}" y="${yKoord(v) - 4}">${yazi} (${v}°)</text>`;
+  // Threshold labels are collected separately and added last.
+  // In SVG what's drawn later appears on top, so the data line doesn't cover the text.
+  let topLayer = "";
+  for (const [v, text] of thresholds) {
+    if (v < min || v > max) continue;
+    topLayer += `<text class="g-threshold-text" x="${pad.left + 6}" y="${yPos(v) - 4}">${text} (${v}°)</text>`;
   }
 
-  // En yeni ölçüm sağ kenarda olacak şekilde noktaları yerleştir
-  const kayma = GRAFIK_NOKTA_SAYISI - degerler.length;
-  const noktalar = ev.gecmis.map((n, i) => [xKoord(i + kayma), yKoord(n.v)]);
+  // Place the points so the newest reading is at the right edge
+  const offset = CHART_POINT_COUNT - values.length;
+  const points = home.history.map((n, i) => [xPos(i + offset), yPos(n.v)]);
 
-  const tabanY = pay.ust + cizimY;
+  const baseY = pad.top + plotH;
 
-  // Alttaki şerit: klimanın o anda ne yaptığı
-  const seritG = cizimG / (GRAFIK_NOKTA_SAYISI - 1) + 0.5;
-  ev.gecmis.forEach((n, i) => {
-    if (n.k === "sogutma" || n.k === "isitma") {
-      s += `<rect class="g-${n.k}" x="${xKoord(i + kayma) - seritG / 2}" y="${tabanY + 3}" width="${seritG}" height="5"/>`;
+  // The strip at the bottom: what the AC was doing at that moment
+  const stripW = plotW / (CHART_POINT_COUNT - 1) + 0.5;
+  home.history.forEach((n, i) => {
+    if (n.a === "cooling" || n.a === "heating") {
+      s += `<rect class="g-${n.a}" x="${xPos(i + offset) - stripW / 2}" y="${baseY + 3}" width="${stripW}" height="5"/>`;
     }
   });
 
-  // Yatay eksen: en yeni ölçümden geriye doğru her 30 ölçümde (≈1 dk) bir saat yazısı
-  for (let i = ev.gecmis.length - 1; i >= 0; i -= 30) {
-    const px = xKoord(i + kayma);
-    if (px < pay.sol + 24) break;  // Sol eksen yazılarıyla çakışmasın
-    const hiza = i === ev.gecmis.length - 1 ? "end" : "middle";
-    const saat = new Date(ev.gecmis[i].t).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-    s += `<text class="g-eksen-yazi" x="${px}" y="${y - 2}" text-anchor="${hiza}">${saat}</text>`;
+  // Horizontal axis: a time label every 30 readings (≈1 min), going back from the newest
+  for (let i = home.history.length - 1; i >= 0; i -= 30) {
+    const px = xPos(i + offset);
+    if (px < pad.left + 24) break;  // Don't collide with the left axis labels
+    const anchor = i === home.history.length - 1 ? "end" : "middle";
+    const clock = new Date(home.history[i].t).toLocaleTimeString(LOCALE, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    s += `<text class="g-axis-text" x="${px}" y="${h - 2}" text-anchor="${anchor}">${clock}</text>`;
   }
 
-  // Dış sıcaklık: kesikli çizgi (veri gelmemiş noktalarda çizgi kesilir)
-  let disYol = "", kalemInik = false;
-  ev.gecmis.forEach((n, i) => {
-    if (typeof n.d !== "number") { kalemInik = false; return; }
-    disYol += `${kalemInik ? "L" : "M"}${xKoord(i + kayma).toFixed(1)},${yKoord(n.d).toFixed(1)}`;
-    kalemInik = true;
+  // Outdoor temperature: dashed line (the line breaks where there is no data)
+  let outdoorPath = "", penDown = false;
+  home.history.forEach((n, i) => {
+    if (typeof n.o !== "number") { penDown = false; return; }
+    outdoorPath += `${penDown ? "L" : "M"}${xPos(i + offset).toFixed(1)},${yPos(n.o).toFixed(1)}`;
+    penDown = true;
   });
-  if (disYol) s += `<path class="g-dis-cizgi" d="${disYol}"/>`;
+  if (outdoorPath) s += `<path class="g-outdoor-line" d="${outdoorPath}"/>`;
 
-  // Çizginin altındaki hafif dolgu ve sıcaklık çizgisi
-  const yol = noktalar.map(([px, py], i) => `${i ? "L" : "M"}${px.toFixed(1)},${py.toFixed(1)}`).join("");
-  s += `<path class="g-alan" d="${yol}L${noktalar.at(-1)[0]},${tabanY}L${noktalar[0][0]},${tabanY}Z"/>`;
-  s += `<path class="g-cizgi" d="${yol}"/>`;
+  // Light fill under the line, and the temperature line
+  const path = points.map(([px, py], i) => `${i ? "L" : "M"}${px.toFixed(1)},${py.toFixed(1)}`).join("");
+  s += `<path class="g-area" d="${path}L${points.at(-1)[0]},${baseY}L${points[0][0]},${baseY}Z"/>`;
+  s += `<path class="g-line" d="${path}"/>`;
 
-  svg.innerHTML = s + ustKatman;
+  svg.innerHTML = s + topLayer;
 }
 
 // ============================================================
-// OLAY GÜNLÜĞÜ
+// EVENT LOG
 // ============================================================
 
-function gunlugeEkle(topic, metin, veri, kayitli) {
-  // Sıcaklık 2 sn'de bir geldiği için istenmedikçe günlüğü kalabalıklaştırmasın
-  const olcumMu = topic === A.topicler.sicaklik || topic === A.topicler.dis_sicaklik;
-  if (olcumMu && !$("sicaklik-goster").checked) return;
+function addToLog(topic, text, data, retained) {
+  // Temperature arrives every 2 s, so don't crowd the log unless asked
+  const isReading = topic === C.topics.temperature || topic === C.topics.outdoor_temperature;
+  if (isReading && !$("show-temperature").checked) return;
 
-  const komutMu = topic.endsWith(A.komut_eki);
-  let icerik;
-  if (!veri) icerik = ad(metin);
-  else if (typeof veri.sicaklik === "number") icerik = `${veri.sicaklik} °C`;
-  else if ("durum" in veri) icerik = ad(veri.durum);
-  else icerik = metin;
-  if (komutMu) icerik = `KOMUT → ${icerik}`;
-  if (veri?.kaynak) icerik += `  (${veri.kaynak})`;
+  const isCommand = topic.endsWith(C.command_suffix);
+  let content;
+  if (!data) content = label(text);
+  else if (typeof data.temperature === "number") content = `${data.temperature} °C`;
+  else if ("state" in data) content = label(data.state);
+  else content = text;
+  if (isCommand) content = `COMMAND → ${content}`;
+  if (data?.source) content += `  (${data.source})`;
 
   const li = document.createElement("li");
-  li.dataset.tur = komutMu ? "komut" : "durum";
-  li.innerHTML = `<time></time><code></code><span class="icerik"></span>`;
-  // textContent kullanıyoruz: mesaj içeriği HTML olarak yorumlanmasın (güvenlik)
-  // Gösterilen saat, mesajın cihazda üretildiği andır (kayıtlı mesajlarda gerçek değişim anı)
-  const zaman = new Date(mesajZamani(veri));
-  li.querySelector("time").textContent = zaman.toLocaleTimeString("tr-TR");
-  li.querySelector("time").dateTime = zaman.toISOString();
-  li.querySelector("time").title = zaman.toLocaleString("tr-TR");
+  li.dataset.kind = isCommand ? "command" : "state";
+  li.innerHTML = `<time></time><code></code><span class="content"></span>`;
+  // The time shown is when the message was produced on the device (for retained messages, the real change time)
+  const time = new Date(messageTime(data));
+  li.querySelector("time").textContent = time.toLocaleTimeString(LOCALE);
+  li.querySelector("time").dateTime = time.toISOString();
+  li.querySelector("time").title = time.toLocaleString(LOCALE);
+  // We use textContent so message content isn't interpreted as HTML (security)
   li.querySelector("code").textContent = topic;
-  li.querySelector(".icerik").textContent = icerik;
-  if (kayitli) {
-    const k = document.createElement("span");
-    k.className = "kayitli";
-    k.textContent = "(kayıtlı son durum)";
-    li.querySelector(".icerik").append(k);
+  li.querySelector(".content").textContent = content;
+  if (retained) {
+    const r = document.createElement("span");
+    r.className = "retained";
+    r.textContent = "(retained last state)";
+    li.querySelector(".content").append(r);
   }
 
-  const gunluk = $("gunluk");
-  gunluk.querySelector(".bos")?.closest("li")?.remove();
-  gunluk.prepend(li);  // En yeni mesaj en üstte
-  while (gunluk.children.length > GUNLUK_SATIR_SAYISI) gunluk.lastElementChild.remove();
+  const log = $("log");
+  log.querySelector(".empty")?.closest("li")?.remove();
+  log.prepend(li);  // Newest message on top
+  while (log.children.length > LOG_ROW_COUNT) log.lastElementChild.remove();
 }
 
-function gunlukBosMu() {
-  const gunluk = $("gunluk");
-  if (!gunluk.children.length) {
-    gunluk.innerHTML = `<li><span class="bos">Henüz mesaj yok</span></li>`;
+function showEmptyLog() {
+  const log = $("log");
+  if (!log.children.length) {
+    log.innerHTML = `<li><span class="empty">No messages yet</span></li>`;
   }
 }
 
 // ============================================================
-// DÜĞMELER
+// BUTTONS
 // ============================================================
 
-function dugmeleriBagla() {
-  // Klima ve alarm seçenek düğmeleri: data-cihaz / data-durum özelliklerinden okunur
-  document.querySelectorAll("button[data-cihaz]").forEach((d) => {
-    d.addEventListener("click", () => komutGonder(d.dataset.cihaz, d.dataset.durum));
+function bindButtons() {
+  // AC and alarm option buttons: read from the data-device / data-state attributes
+  document.querySelectorAll("button[data-device]").forEach((b) => {
+    b.addEventListener("click", () => sendCommand(b.dataset.device, b.dataset.state));
   });
 
-  $("lamba-dugme").addEventListener("click", () => {
-    komutGonder("lamba", ev.lamba === "acik" ? "kapali" : "acik");
+  $("lamp-button").addEventListener("click", () => {
+    sendCommand("lamp", home.lamp === "on" ? "off" : "on");
   });
 
-  document.querySelectorAll("button[data-sim]").forEach((d) => {
-    d.addEventListener("click", () => {
-      if (d.dataset.sim === "hareket") simuleEt(d, "hareket", "var", "yok");
-      else simuleEt(d, "kapi", "acik", "kapali");
+  document.querySelectorAll("button[data-sim]").forEach((b) => {
+    b.addEventListener("click", () => {
+      if (b.dataset.sim === "motion") simulate(b, "motion", "detected", "clear");
+      else simulate(b, "door", "open", "closed");
     });
   });
 
-  $("gunluk-temizle").addEventListener("click", () => {
-    $("gunluk").replaceChildren();
-    gunlukBosMu();
+  $("clear-log").addEventListener("click", () => {
+    $("log").replaceChildren();
+    showEmptyLog();
   });
 }
 
-function zamanDamgasi() {
-  // Python tarafıyla aynı biçim: 2026-10-10T16:10:46 (yerel saat)
-  const s = new Date();
-  const iki = (n) => String(n).padStart(2, "0");
-  return `${s.getFullYear()}-${iki(s.getMonth() + 1)}-${iki(s.getDate())}` +
-         `T${iki(s.getHours())}:${iki(s.getMinutes())}:${iki(s.getSeconds())}`;
+function timestamp() {
+  // Same format as the Python side: 2026-10-10T16:10:46 (local time)
+  const d = new Date();
+  const two = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}` +
+         `T${two(d.getHours())}:${two(d.getMinutes())}:${two(d.getSeconds())}`;
 }
 
-basla();
+start();

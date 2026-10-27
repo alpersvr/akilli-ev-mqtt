@@ -1,146 +1,146 @@
 <!doctype html>
 <!--
-  index.html: Panelin İSKELETİ (yapısı).
-  Sayfada hangi kartların, yazıların ve düğmelerin olduğunu tanımlar.
-  Görünüm panel.css'te, davranış (MQTT bağlantısı, düğmeler) panel.js'te.
+  index.html: The panel's SKELETON (structure).
+  Defines which cards, texts and buttons are on the page.
+  Appearance lives in panel.css, behaviour (MQTT connection, buttons) in panel.js.
 -->
-<html lang="tr">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Akıllı Ev Paneli</title>
+  <title>Smart Home Panel</title>
   <link rel="stylesheet" href="panel.css">
 </head>
 <body>
-  <header class="ust">
+  <header class="top">
     <div>
-      <h1>Akıllı Ev</h1>
-      <p class="alt-baslik">MQTT izleme ve kontrol paneli</p>
+      <h1>Smart Home</h1>
+      <p class="subtitle">MQTT monitoring and control panel</p>
     </div>
-    <div id="broker-durum" class="rozet" data-durum="baglaniyor" role="status">
-      <span class="nokta"></span><span id="broker-metin">Bağlanıyor…</span>
+    <div id="broker-status" class="badge" data-state="connecting" role="status">
+      <span class="dot"></span><span id="broker-text">Connecting…</span>
     </div>
   </header>
 
-  <main class="izgara">
-    <!-- SALON İKLİMİ: sıcaklık, grafik, klima kontrolü -->
-    <section class="kart tam">
-      <div class="kart-ust">
-        <h2>Salon iklimi</h2>
-        <span class="cevrimdisi-etiket" data-cevrim="sicaklik" hidden>Sensör çevrimdışı</span>
+  <main class="grid">
+    <!-- LIVING ROOM CLIMATE: temperature, chart, AC control -->
+    <section class="card full">
+      <div class="card-head">
+        <h2>Living room climate</h2>
+        <span class="offline-tag" data-online="temperature" hidden>Sensor offline</span>
       </div>
-      <div class="iklim">
-        <div class="iklim-ozet">
-          <div class="buyuk-deger"><span id="sicaklik-deger">--</span><span class="birim">°C</span></div>
-          <p class="soluk kucuk" id="sicaklik-zaman">Veri bekleniyor…</p>
+      <div class="climate">
+        <div class="climate-summary">
+          <div class="big-value"><span id="temperature-value">--</span><span class="unit">°C</span></div>
+          <p class="muted small" id="temperature-time">Waiting for data…</p>
 
-          <div class="satir-baslik dis-satir">
-            <span class="etiket">Dış ortam</span>
-            <span class="durum-yazi"><span id="dis-sicaklik-deger">--</span> °C</span>
+          <div class="row-head outdoor-row">
+            <span class="label">Outdoor</span>
+            <span class="state-text"><span id="outdoor-temperature-value">--</span> °C</span>
           </div>
-          <p class="soluk kucuk" id="dis-sicaklik-zaman"></p>
+          <p class="muted small" id="outdoor-temperature-time"></p>
 
-          <div class="satir-baslik">
-            <span class="etiket">Klima</span>
-            <span id="klima-durum" class="durum-yazi">—</span>
-            <span class="cevrimdisi-etiket" data-cevrim="klima" hidden>Çevrimdışı</span>
+          <div class="row-head">
+            <span class="label">AC</span>
+            <span id="ac-state" class="state-text">—</span>
+            <span class="offline-tag" data-online="ac" hidden>Offline</span>
           </div>
-          <p class="soluk kucuk" data-zaman="klima"></p>
-          <div class="segment" role="group" aria-label="Klima modu">
-            <button type="button" data-cihaz="klima" data-durum="kapali">Kapalı</button>
-            <button type="button" data-cihaz="klima" data-durum="sogutma">Soğutma</button>
-            <button type="button" data-cihaz="klima" data-durum="isitma">Isıtma</button>
+          <p class="muted small" data-time="ac"></p>
+          <div class="segment" role="group" aria-label="AC mode">
+            <button type="button" data-device="ac" data-state="off">Off</button>
+            <button type="button" data-device="ac" data-state="cooling">Cooling</button>
+            <button type="button" data-device="ac" data-state="heating">Heating</button>
           </div>
-          <p class="soluk kucuk">Otomasyon, sıcaklık eşikleri aşılınca klimayı yeniden ayarlar.</p>
+          <p class="muted small">The automation readjusts the AC when temperature thresholds are crossed.</p>
         </div>
 
-        <div class="grafik-alani">
-          <svg id="sicaklik-grafik" role="img" aria-label="Son ölçümlerin sıcaklık grafiği"></svg>
-          <div class="lejant">
-            <span><i class="lj-cizgi"></i>Salon</span>
-            <span><i class="lj-cizgi dis"></i>Dış ortam</span>
-            <span><i class="lj-blok sogutma"></i>Klima soğutuyor</span>
-            <span><i class="lj-blok isitma"></i>Klima ısıtıyor</span>
-            <span><i class="lj-esik"></i>Otomasyon eşiği</span>
+        <div class="chart-area">
+          <svg id="temperature-chart" role="img" aria-label="Temperature chart of recent readings"></svg>
+          <div class="legend">
+            <span><i class="lg-line"></i>Living room</span>
+            <span><i class="lg-line outdoor"></i>Outdoor</span>
+            <span><i class="lg-block cooling"></i>AC cooling</span>
+            <span><i class="lg-block heating"></i>AC heating</span>
+            <span><i class="lg-threshold"></i>Automation threshold</span>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- AYDINLATMA: lamba ve hareket sensörü -->
-    <section class="kart">
-      <div class="kart-ust"><h2>Aydınlatma</h2></div>
-      <div class="lamba-satiri">
-        <div id="lamba-gorsel" class="lamba" aria-hidden="true"></div>
+    <!-- LIGHTING: lamp and motion sensor -->
+    <section class="card">
+      <div class="card-head"><h2>Lighting</h2></div>
+      <div class="lamp-row">
+        <div id="lamp-visual" class="lamp" aria-hidden="true"></div>
         <div>
-          <div class="satir-baslik">
-            <span class="etiket">Salon lambası</span>
-            <span class="cevrimdisi-etiket" data-cevrim="lamba" hidden>Çevrimdışı</span>
+          <div class="row-head">
+            <span class="label">Living room lamp</span>
+            <span class="offline-tag" data-online="lamp" hidden>Offline</span>
           </div>
-          <div id="lamba-durum" class="durum-yazi buyuk">—</div>
-          <p class="soluk kucuk" data-zaman="lamba"></p>
+          <div id="lamp-state" class="state-text large">—</div>
+          <p class="muted small" data-time="lamp"></p>
         </div>
       </div>
-      <button type="button" id="lamba-dugme" class="dugme ana">Aç</button>
+      <button type="button" id="lamp-button" class="button primary">Turn on</button>
 
       <hr>
-      <div class="satir-baslik">
-        <span class="etiket">Hareket</span>
-        <span id="hareket-durum" class="durum-yazi">—</span>
-        <span class="cevrimdisi-etiket" data-cevrim="hareket" hidden>Çevrimdışı</span>
+      <div class="row-head">
+        <span class="label">Motion</span>
+        <span id="motion-state" class="state-text">—</span>
+        <span class="offline-tag" data-online="motion" hidden>Offline</span>
       </div>
-      <p class="soluk kucuk" id="hareket-zaman"></p>
-      <button type="button" class="dugme sim" data-sim="hareket">Hareket simüle et</button>
+      <p class="muted small" id="motion-time"></p>
+      <button type="button" class="button sim" data-sim="motion">Simulate motion</button>
     </section>
 
-    <!-- GÜVENLİK: alarm ve kapı sensörü -->
-    <section class="kart">
-      <div class="kart-ust"><h2>Güvenlik</h2></div>
-      <div id="alarm-kutu" class="alarm-kutu">
-        <span class="etiket">Alarm</span>
-        <span id="alarm-durum" class="durum-yazi buyuk">—</span>
-        <span class="cevrimdisi-etiket" data-cevrim="alarm" hidden>Çevrimdışı</span>
+    <!-- SECURITY: alarm and door sensor -->
+    <section class="card">
+      <div class="card-head"><h2>Security</h2></div>
+      <div id="alarm-box" class="alarm-box">
+        <span class="label">Alarm</span>
+        <span id="alarm-state" class="state-text large">—</span>
+        <span class="offline-tag" data-online="alarm" hidden>Offline</span>
       </div>
-      <p class="soluk kucuk" data-zaman="alarm"></p>
+      <p class="muted small" data-time="alarm"></p>
       <div class="segment" role="group" aria-label="Alarm">
-        <button type="button" data-cihaz="alarm" data-durum="kurulu">Kur</button>
-        <button type="button" data-cihaz="alarm" data-durum="devre_disi">Devre dışı bırak</button>
+        <button type="button" data-device="alarm" data-state="armed">Arm</button>
+        <button type="button" data-device="alarm" data-state="disarmed">Disarm</button>
       </div>
 
       <hr>
-      <div class="satir-baslik">
-        <span class="etiket">Giriş kapısı</span>
-        <span id="kapi-durum" class="durum-yazi">—</span>
-        <span class="cevrimdisi-etiket" data-cevrim="kapi" hidden>Çevrimdışı</span>
+      <div class="row-head">
+        <span class="label">Front door</span>
+        <span id="door-state" class="state-text">—</span>
+        <span class="offline-tag" data-online="door" hidden>Offline</span>
       </div>
-      <p class="soluk kucuk" data-zaman="kapi"></p>
-      <button type="button" class="dugme sim" data-sim="kapi">Kapı açılmasını simüle et</button>
+      <p class="muted small" data-time="door"></p>
+      <button type="button" class="button sim" data-sim="door">Simulate door opening</button>
     </section>
 
-    <!-- CİHAZLAR: ev/sistem/baglanti/# mesajlarından çevrimiçi listesi -->
-    <section class="kart">
-      <div class="kart-ust"><h2>Cihazlar</h2></div>
-      <ul id="cihaz-listesi" class="cihaz-listesi">
-        <li class="soluk">Henüz bilgi yok</li>
+    <!-- DEVICES: online list from home/system/connection/# messages -->
+    <section class="card">
+      <div class="card-head"><h2>Devices</h2></div>
+      <ul id="device-list" class="device-list">
+        <li class="muted">No information yet</li>
       </ul>
     </section>
 
-    <!-- OLAY GÜNLÜĞÜ: gelen tüm MQTT mesajları -->
-    <section class="kart tam">
-      <div class="kart-ust">
-        <h2>Olay günlüğü</h2>
-        <div class="gunluk-arac">
-          <label><input type="checkbox" id="sicaklik-goster"> Sıcaklık ölçümlerini göster</label>
-          <button type="button" id="gunluk-temizle" class="dugme kucuk-dugme">Temizle</button>
+    <!-- EVENT LOG: every incoming MQTT message -->
+    <section class="card full">
+      <div class="card-head">
+        <h2>Event log</h2>
+        <div class="log-tools">
+          <label><input type="checkbox" id="show-temperature"> Show temperature readings</label>
+          <button type="button" id="clear-log" class="button small-button">Clear</button>
         </div>
       </div>
-      <div class="gunluk-kap">
-        <ol id="gunluk" class="gunluk"></ol>
+      <div class="log-wrap">
+        <ol id="log" class="log"></ol>
       </div>
     </section>
   </main>
 
-  <!-- Önce MQTT kütüphanesi, sonra bizim kodumuz yüklenir. -->
+  <!-- The MQTT library loads first, then our code. -->
   <script src="mqtt.min.js"></script>
   <script src="panel.js"></script>
 </body>

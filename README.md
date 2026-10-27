@@ -1,129 +1,132 @@
-# MQTT Tabanlı Akıllı Ev Simülasyonu
+# MQTT-Based Smart Home Simulation
 
-Donanım kullanmadan, tüm cihazları Python ile simüle eden MQTT tabanlı bir akıllı ev projesi.
-Broker olarak yerel **Mosquitto**, istemci kütüphanesi olarak **paho-mqtt** (2.x) kullanılır.
+An MQTT-based smart home project that simulates every device in Python, with no hardware.
+It uses a local **Mosquitto** broker and the **paho-mqtt** (2.x) client library.
 
-| Aşama | İçerik | Durum |
+| Stage | Content | Status |
 |---|---|---|
-| 1 | Sanal sıcaklık sensörü + ekrana yazan abone | ✅ |
-| 2 | Kapı, hareket, lamba, klima, alarm + otomasyon kuralları | ✅ |
-| 3 | Tarayıcıda izleme ve kontrol paneli | ✅ |
-| 4 | QoS 0/1/2 gecikme ve kayıp deneyi + grafikler | ✅ |
+| 1 | Virtual temperature sensor + subscriber that prints to the screen | ✅ |
+| 2 | Door, motion, lamp, AC, alarm + automation rules | ✅ |
+| 3 | Monitoring and control panel in the browser | ✅ |
+| 4 | QoS 0/1/2 latency and loss experiment + plots | ✅ |
 
-## Mimari
+## Architecture
 
 ```
-  SENSÖRLER (ölçer)                                    EYLEYİCİLER (değiştirir)
-  sicaklik_sensoru.py ─┐                          ┌──> lamba.py
-  hareket_sensoru.py  ─┼──>  MOSQUITTO BROKER  <──┼──> klima.py
-  kapi_sensoru.py     ─┘          ▲     │         └──> alarm.py
-                                  │     ▼
-                     otomasyon.py (kurallar)    abone.py (izleme ekranı)
-                                  ▲
-                                  │ WebSocket (port 9001)
-                        Tarayıcıdaki panel (panel/)
+  SENSORS (measure)                                    ACTUATORS (change)
+  temperature_sensor.py ─┐                          ┌──> lamp.py
+  motion_sensor.py      ─┼──>  MOSQUITTO BROKER  <──┼──> air_conditioner.py
+  door_sensor.py        ─┘          ▲     │         └──> alarm.py
+                                    │     ▼
+                      automation.py (rules)    subscriber.py (monitor)
+                                    ▲
+                                    │ WebSocket (port 9001)
+                          Panel in the browser (panel/)
 ```
 
-Tarayıcıdaki panel de ayrı bir MQTT istemcisidir. Broker'a WebSocket üzerinden bağlanır, diğer programlarla aynı topic'leri kullanır.
+The panel in the browser is a separate MQTT client too. It connects to the broker over WebSocket and uses the same topics as the other programs.
 
-Hiçbir program diğerini doğrudan tanımaz. Herkes sadece broker ile konuşur.
-Sensörler veriyi yayınlar. Otomasyon bu veriyi dinler, kurallara göre eyleyicilere komut gönderir.
-Eyleyiciler komutu uygulayıp yeni durumlarını yayınlar.
+No program knows any other directly. Everyone talks only to the broker.
+Sensors publish data. The automation listens to that data and sends commands to the actuators according to its rules.
+Actuators apply the command and publish their new state.
 
-## Topic (konu) düzeni
+## Topic layout
 
-| Topic | Kim yayınlar | Örnek içerik |
+| Topic | Published by | Example payload |
 |---|---|---|
-| `ev/salon/sicaklik` | Sıcaklık sensörü | `{"sicaklik": 24.5, "birim": "C", ...}` |
-| `ev/dis/sicaklik` | Sıcaklık sensörü (dış ortam) | `{"sicaklik": 30.2, "birim": "C", ...}` |
-| `ev/salon/hareket` | Hareket sensörü | `{"durum": "var"}` / `"yok"` |
-| `ev/giris/kapi` | Kapı sensörü | `{"durum": "acik"}` / `"kapali"` |
-| `ev/salon/lamba` | Lamba | `{"durum": "acik"}` / `"kapali"` |
-| `ev/salon/klima` | Klima | `{"durum": "kapali"}` / `"sogutma"` / `"isitma"` |
-| `ev/giris/alarm` | Alarm | `{"durum": "devre_disi"}` / `"kurulu"` / `"caliyor"` |
-| `ev/salon/lamba/komut` | Otomasyon / kullanıcı | `{"durum": "acik"}` |
-| `ev/salon/klima/komut` | Otomasyon / kullanıcı | `{"durum": "sogutma"}` |
-| `ev/giris/alarm/komut` | Otomasyon / kullanıcı | `{"durum": "kurulu"}` |
-| `ev/sistem/baglanti/<cihaz_id>` | Her cihaz / broker | `cevrimici` / `cevrimdisi` |
+| `home/living_room/temperature` | Temperature sensor | `{"temperature": 24.5, "unit": "C", ...}` |
+| `home/outdoor/temperature` | Temperature sensor (outdoor) | `{"temperature": 30.2, "unit": "C", ...}` |
+| `home/living_room/motion` | Motion sensor | `{"state": "detected"}` / `"clear"` |
+| `home/entrance/door` | Door sensor | `{"state": "open"}` / `"closed"` |
+| `home/living_room/lamp` | Lamp | `{"state": "on"}` / `"off"` |
+| `home/living_room/ac` | AC | `{"state": "off"}` / `"cooling"` / `"heating"` |
+| `home/entrance/alarm` | Alarm | `{"state": "disarmed"}` / `"armed"` / `"triggered"` |
+| `home/living_room/lamp/command` | Automation / user | `{"state": "on"}` |
+| `home/living_room/ac/command` | Automation / user | `{"state": "cooling"}` |
+| `home/entrance/alarm/command` | Automation / user | `{"state": "armed"}` |
+| `home/system/connection/<device_id>` | Each device / broker | `online` / `offline` |
 
-Kullanılan MQTT özellikleri:
+Every JSON message also carries `device_id` (for state messages) and a `timestamp` (e.g. `2026-10-10T16:10:46`, local time) added when it is published.
 
-- **Retain:** Durum mesajları broker'da saklanır. Sonradan bağlanan bir program (ör. 3. aşamadaki panel) son durumu hemen öğrenir.
-- **Last Will (LWT):** Bir cihaz beklenmedik şekilde koparsa broker onun yerine `cevrimdisi` yayınlar.
-- **Joker karakter `#`:** `abone.py`, `ev/#` ile evdeki tüm mesajları tek abonelikle alır.
+MQTT features used:
 
-## Otomasyon kuralları (`otomasyon.py`)
+- **Retain:** State messages are kept on the broker. A program that connects later (e.g. the stage 3 panel) learns the latest state right away.
+- **Last Will (LWT):** If a device drops unexpectedly, the broker publishes `offline` on its behalf.
+- **Wildcard `#`:** `subscriber.py` receives every message in the home with a single subscription to `home/#`.
 
-| Kural | Koşul | Eylem |
+## Automation rules (`automation.py`)
+
+| Rule | Condition | Action |
 |---|---|---|
-| 1. Akıllı aydınlatma | Hareket algılandı | Lambayı aç |
-| | 15 sn boyunca hareket yok | Lambayı kapat |
-| 2. İklim kontrolü | Sıcaklık ≥ 26 °C | Klima soğutma (23 °C'ye inince kapanır) |
-| | Sıcaklık ≤ 19 °C | Klima ısıtma (22 °C'ye çıkınca kapanır) |
-| 3. Güvenlik | Alarm kuruluyken kapı açıldı veya hareket var | Alarmı çaldır |
+| 1. Smart lighting | Motion detected | Turn the lamp on |
+| | No motion for 15 s | Turn the lamp off |
+| 2. Climate control | Temperature ≥ 26 °C | AC cooling (turns off at 23 °C) |
+| | Temperature ≤ 19 °C | AC heating (turns off at 22 °C) |
+| 3. Security | Door opened or motion while the alarm is armed | Trigger the alarm |
 
-Sıcaklık sensörü klimanın durumunu da dinler. Klima soğuttuğunda oda gerçekten soğur, kapandığında dış sıcaklığa doğru yeniden ısınır.
-Bu sayede ekranda kapalı döngü bir termostat davranışı görülür. Tüm eşikler `ayarlar.py` içinden değiştirilebilir.
+The temperature sensor also listens to the AC's state. When the AC cools, the room really cools down; when it turns off, the room warms back up towards the outdoor temperature.
+The outdoor temperature itself slowly wanders around `OUTDOOR_TEMPERATURE` (±`OUTDOOR_TEMPERATURE_RANGE`).
+This shows a closed-loop thermostat on screen. All thresholds can be changed in `config.py`.
 
-## Dosyalar
+## Files
 
-| Dosya | Ne işe yarar? |
+| File | What it does |
 |---|---|
-| `ayarlar.py` | Broker adresi, topic adları, olasılıklar, kural eşikleri. **Tüm ayarlar burada.** |
-| `ortak.py` | Herkesin kullandığı yardımcılar: istemci oluşturma, JSON gönderme/çözme, ana döngü, düzgün kapanış. |
-| `eyleyici.py` | Lamba/klima/alarm için ortak şablon (sınıf): komut dinle → durumu değiştir → durumu yayınla. |
-| `sicaklik_sensoru.py` | 2 sn'de bir salon ve dış ortam sıcaklığını yayınlar. Klimanın etkisini simüle eder. |
-| `hareket_sensoru.py` | Rastgele zamanlarda "biri odaya girdi" olayı üretir. |
-| `kapi_sensoru.py` | Rastgele zamanlarda kapının açılıp kapanmasını üretir. |
-| `lamba.py` | Sanal lamba (açık/kapalı). |
-| `klima.py` | Sanal klima (kapalı/soğutma/ısıtma). |
-| `alarm.py` | Sanal alarm (devre dışı/kurulu/çalıyor). Çalarken siren uyarısı yazar. |
-| `otomasyon.py` | Evin beyni: tüm sensörleri dinler, kurallara göre komut gönderir. |
-| `abone.py` | İzleme ekranı: `ev/#` altındaki tüm mesajları hizalı biçimde yazar. |
-| `mosquitto.conf` | Projeye özel broker ayarı: 1883 (Python) ve 9001 (WebSocket, panel) portları. |
-| `panel.py` | Paneli http://localhost:8000 adresinde yayınlar, tarayıcıyı açar, `ayarlar.py`'yi sayfaya `/ayarlar.json` olarak verir. |
-| `panel/index.html` | Panelin yapısı: kartlar, yazılar, düğmeler. |
-| `panel/panel.css` | Panelin görünümü (açık/koyu tema, telefon uyumu). |
-| `panel/panel.js` | Panelin davranışı: MQTT bağlantısı, ekranı güncelleme, grafik, düğmelerden komut gönderme. |
-| `panel/mqtt.min.js` | Tarayıcı için hazır MQTT kütüphanesi (mqtt.js 5.10.1). Projeye kopyalandığı için internet gerekmez. Elle düzenlenmez. |
-| `hepsini_baslat.py` | 7 programı (abone hariç) tek komutla başlatır, Ctrl+C ile hepsini kapatır. |
-| `ag_simulatoru.py` | Deney için ağ simülatörü: istemci ile broker arasına girip gecikme ekler ve bağlantıyı rastgele koparır. |
-| `qos_deneyi.py` | QoS 0/1/2 deneyini yürütür, sonuçları `sonuclar/<tarih-saat>/` klasörüne CSV olarak yazar. |
-| `qos_grafik.py` | Deney sonuçlarından grafikleri ve özet tabloyu üretir. |
-| `requirements.txt` | Gerekli Python kütüphaneleri (`paho-mqtt`, `matplotlib`). |
+| `config.py` | Broker address, topic names, probabilities, rule thresholds. **All settings live here.** |
+| `common.py` | Helpers everyone uses: creating a client, sending/parsing JSON, the main loop, clean shutdown. |
+| `actuator.py` | Shared template (class) for the lamp/AC/alarm: listen for commands → change state → publish state. |
+| `temperature_sensor.py` | Publishes the living room and outdoor temperature every 2 s. Simulates the AC's effect. |
+| `motion_sensor.py` | Produces "someone entered the room" events at random times. |
+| `door_sensor.py` | Opens and closes the door at random times. |
+| `lamp.py` | Virtual lamp (on/off). |
+| `air_conditioner.py` | Virtual AC (off/cooling/heating). |
+| `alarm.py` | Virtual alarm (disarmed/armed/triggered). Prints a siren warning while triggered. |
+| `automation.py` | The brain of the home: listens to every sensor and sends commands according to the rules. |
+| `subscriber.py` | Monitor: prints every message under `home/#` in aligned columns. |
+| `mosquitto.conf` | Project-specific broker settings: ports 1883 (Python) and 9001 (WebSocket, panel). |
+| `panel.py` | Serves the panel at http://localhost:8000, opens the browser, and hands `config.py` to the page as `/config.json`. |
+| `panel/index.html` | The panel's structure: cards, texts, buttons. |
+| `panel/panel.css` | The panel's appearance (light/dark theme, phone layout). |
+| `panel/panel.js` | The panel's behaviour: MQTT connection, updating the screen, chart, sending commands from buttons. |
+| `panel/mqtt.min.js` | Ready-made MQTT library for the browser (mqtt.js 5.10.1). Bundled in the project, so no internet is needed. Not edited by hand. |
+| `start_all.py` | Starts 7 programs (all except the subscriber and panel) with one command; Ctrl+C stops them all. |
+| `network_simulator.py` | Network simulator for the experiment: sits between client and broker, adds delay and randomly drops the connection. |
+| `qos_experiment.py` | Runs the QoS 0/1/2 experiment and writes the results as CSV to `results/<date-time>/`. |
+| `qos_plots.py` | Produces the plots and the summary table from the experiment results. |
+| `requirements.txt` | Required Python libraries (`paho-mqtt`, `matplotlib`). |
 
-## Kurulum (bir kez yapılır)
+## Setup (once)
 
 ```bash
 cd ~/akilli-ev-mqtt
-python3 -m venv .venv                 # sanal ortam oluştur
-source .venv/bin/activate             # sanal ortamı etkinleştir
-pip install -r requirements.txt       # paho-mqtt'yi kur
+python3 -m venv .venv                 # create a virtual environment
+source .venv/bin/activate             # activate it
+pip install -r requirements.txt       # install paho-mqtt and matplotlib
 ```
 
-## Çalıştırma
+## Running
 
-**Terminal 1: Broker (proje ayarlarıyla)**
+**Terminal 1: Broker (with the project settings)**
 
 ```bash
 cd ~/akilli-ev-mqtt
 mosquitto -c mosquitto.conf -v
 ```
 
-`-c mosquitto.conf` olmadan da Python programları çalışır, ancak panelin kullandığı WebSocket portu (9001) açılmaz.
+The Python programs also work without `-c mosquitto.conf`, but then the WebSocket port (9001) used by the panel is not opened.
 
-**Terminal 2: İzleme ekranı**
+**Terminal 2: Monitor**
 
 ```bash
 cd ~/akilli-ev-mqtt && source .venv/bin/activate
-python abone.py
+python subscriber.py
 ```
 
-**Terminal 3: Tüm ev**
+**Terminal 3: The whole home**
 
 ```bash
 cd ~/akilli-ev-mqtt && source .venv/bin/activate
-python hepsini_baslat.py
+python start_all.py
 ```
 
 **Terminal 4: Panel**
@@ -133,88 +136,90 @@ cd ~/akilli-ev-mqtt && source .venv/bin/activate
 python panel.py
 ```
 
-Tarayıcı kendiliğinden açılır. Açılmazsa adres çubuğuna http://localhost:8000 yazın.
-Terminal 2'deki izleme ekranı isteğe bağlıdır; panelde de bir olay günlüğü vardır.
+The browser opens by itself. If it doesn't, type http://localhost:8000 in the address bar.
+The monitor in Terminal 2 is optional; the panel has an event log too.
 
-İsterseniz programları tek tek de çalıştırabilirsiniz (`python lamba.py`, `python otomasyon.py` ...). Her biri bağımsızdır.
+You can also run the programs one by one if you like (`python lamp.py`, `python automation.py` ...). Each is independent.
 
-Durdurmak için ilgili terminalde **Ctrl+C**.
+To stop, press **Ctrl+C** in the relevant terminal.
 
-## Panelde neler var?
+## What's on the panel?
 
-- **Salon iklimi:** Anlık sıcaklık ve son 3 dakikanın grafiği. Grafikte otomasyon eşikleri ve klimanın çalıştığı anlar (alttaki mavi/turuncu şerit) görünür. Klima modu buradan değiştirilebilir.
-- **Aydınlatma:** Lambayı aç/kapat, hareket durumu, lambanın kaç saniye sonra kapanacağı. "Hareket simüle et" düğmesi sensör adına 4 sn'lik bir hareket olayı yayınlar.
-- **Güvenlik:** Alarmı kur / devre dışı bırak, kapı durumu, "Kapı açılmasını simüle et".
-- **Cihazlar:** Last Will mesajlarından oluşan çevrimiçi/çevrimdışı listesi. Bir cihazı kapatırsanız ilgili kartta kırmızı "Çevrimdışı" etiketi çıkar.
-- **Olay günlüğü:** Gelen tüm MQTT mesajları. Komutlar mavi satırla vurgulanır, kaynağı (panel, simülasyon) parantez içinde yazar.
+- **Living room climate:** Current indoor and outdoor temperature with the time of the last reading, and a chart of the last 3 minutes. The chart shows the outdoor temperature (dashed line), the automation thresholds, the moments the AC was running (blue/orange strip at the bottom) and time labels along the bottom. The AC mode can be changed here.
+- **Lighting:** Turn the lamp on/off, motion state, how many seconds until the lamp turns off. The "Simulate motion" button publishes a 4 s motion event on behalf of the sensor.
+- **Security:** Arm / disarm the alarm, door state, "Simulate door opening".
+- **Devices:** Online/offline list built from Last Will messages. If you stop a device, a red "Offline" tag appears on its card.
+- **Event log:** Every incoming MQTT message. Commands are highlighted with a blue row, and their source (panel, simulation) is shown in parentheses.
 
-**Demo önerisi:** Paneli açın → "Kur" ile alarmı kurun → "Hareket simüle et" düğmesine basın. Lamba yanar, alarm çalar ve olay günlüğünde zincirin tamamı görünür: sensör → otomasyon komutu → eyleyici durumu.
+Every state on the panel shows when it last changed ("Last update 16:10:46 · 5 s ago"). This time comes from the message's `timestamp` field, so for retained messages it is the moment the state really changed, not the moment the page was opened. The event log's time column uses the same value; hover over it to see the full date.
 
-**Not:** Panelden verilen komut otomasyon kurallarına ters düşerse otomasyon onu düzeltir. Örneğin oda 24 °C'deyken klimayı ısıtmaya alırsanız, bir sonraki ölçümde otomasyon klimayı kapatır (ısıtma 22 °C'de durur).
+**Demo suggestion:** Open the panel → arm the alarm with "Arm" → press "Simulate motion". The lamp turns on, the alarm goes off, and the event log shows the whole chain: sensor → automation command → actuator state.
 
-## Elle komut gönderme (ayrı bir terminalden)
+**Note:** If a command from the panel contradicts the automation rules, the automation corrects it. For example, if you switch the AC to heating while the room is at 24 °C, the automation turns the AC off at the next reading (heating stops at 22 °C).
+
+## Sending commands manually (from another terminal)
 
 ```bash
-# Alarmı kur (evden çıktınız) -> kapı açılınca veya hareket olunca çalar
-mosquitto_pub -t ev/giris/alarm/komut -m '{"durum":"kurulu"}'
+# Arm the alarm (you left home) -> it triggers when the door opens or there is motion
+mosquitto_pub -t home/entrance/alarm/command -m '{"state":"armed"}'
 
-# Alarmı sustur / devre dışı bırak
-mosquitto_pub -t ev/giris/alarm/komut -m '{"durum":"devre_disi"}'
+# Silence / disarm the alarm
+mosquitto_pub -t home/entrance/alarm/command -m '{"state":"disarmed"}'
 
-# Lambayı elle aç (15 sn hareket olmazsa otomasyon kapatır)
-mosquitto_pub -t ev/salon/lamba/komut -m '{"durum":"acik"}'
+# Turn the lamp on manually (the automation turns it off after 15 s without motion)
+mosquitto_pub -t home/living_room/lamp/command -m '{"state":"on"}'
 
-# Sahte bir hareket olayı gönder (sensörü taklit et)
-mosquitto_pub -t ev/salon/hareket -m '{"durum":"var"}'
+# Send a fake motion event (imitate the sensor)
+mosquitto_pub -t home/living_room/motion -m '{"state":"detected"}'
 ```
 
-**Kış senaryosu:** `ayarlar.py` içinde `DIS_SICAKLIK = 12.0` yapıp programları yeniden başlatın. Klimanın ısıtmaya geçtiğini görürsünüz.
+**Winter scenario:** Set `OUTDOOR_TEMPERATURE = 12.0` in `config.py` and restart the programs. You'll see the AC switch to heating.
 
-## Sık karşılaşılan hatalar
+## Common errors
 
-| Hata | Çözüm |
+| Error | Fix |
 |---|---|
-| `HATA: Broker'a bağlanılamadı/ulaşılamadı` | Terminal 1'de `mosquitto -c mosquitto.conf -v` çalışıyor olmalı. |
-| Panelde "Broker bağlantısı yok" yazıyor | Mosquitto `-c mosquitto.conf` olmadan başlatılmış; WebSocket portu kapalı. Kapatıp ayar dosyasıyla yeniden başlatın. |
-| Panel açılıyor ama boş/eski görünüyor | Sayfayı yenileyin (Cmd+R). `ayarlar.py`'yi değiştirdiyseniz `panel.py`'yi yeniden başlatın. |
-| `8000 portu kullanımda` | Panel zaten açık; ikinci kez başlatmaya gerek yok. |
-| `ModuleNotFoundError: No module named 'paho'` | Sanal ortam etkin değil. `source .venv/bin/activate` komutunu çalıştırın. |
-| `Address already in use` (mosquitto başlatırken) | Broker zaten çalışıyor (muhtemelen `brew services` ile). Tekrar başlatmaya gerek yok. |
-| Bir program sürekli "Bağlantı koptu" yazıyor | Aynı programı iki kez açmış olabilirsiniz. Aynı `cihaz_id` ile bağlanan ikinci istemci ilkini düşürür. |
-| Kod değiştirdim ama davranış değişmedi | Çalışan programlar eski kodla devam eder. Ctrl+C ile kapatıp yeniden başlatın. |
+| `ERROR: Could not connect to / reach the broker` | `mosquitto -c mosquitto.conf -v` must be running in Terminal 1. |
+| The panel says "No broker connection" | Mosquitto was started without `-c mosquitto.conf`; the WebSocket port is closed. Stop it and restart it with the config file. |
+| The panel opens but looks empty/old | Reload the page (Cmd+R). If you changed `config.py`, restart `panel.py`. |
+| `Port 8000 is in use` | The panel is already open; no need to start it a second time. |
+| `ModuleNotFoundError: No module named 'paho'` | The virtual environment isn't active. Run `source .venv/bin/activate`. |
+| `Address already in use` (when starting mosquitto) | The broker is already running (probably via `brew services`). No need to start it again. |
+| A program keeps printing "Connection lost" | You may have opened the same program twice. A second client connecting with the same `device_id` drops the first. |
+| I changed the code but nothing changed | Running programs keep using the old code. Stop them with Ctrl+C and start them again. |
 
-## 4. aşama: QoS deneyi
+## Stage 4: QoS experiment
 
-### Ne ölçülüyor?
+### What is measured?
 
-Bir yayıncı sabit hızda (varsayılan 50 mesaj/sn) 500 mesaj gönderir, bir abone bunları alır. Her mesajın içinde sıra numarası ve gönderildiği an yazılıdır.
+A publisher sends 500 messages at a fixed rate (default 50 msg/s) and a subscriber receives them. Each message contains its sequence number and the moment it was sent.
 
-| Ölçüt | Tanım |
+| Metric | Definition |
 |---|---|
-| Gecikme | Mesajın gönderildiği andan abonenin onu aldığı ana kadar geçen süre (uçtan uca). |
-| Kayıp | Gönderilip hiç ulaşmayan mesajların oranı. |
-| Kopya | Aynı mesajın birden fazla kez ulaşması. |
+| Latency | Time from when the message is sent until the subscriber receives it (end-to-end). |
+| Loss | Share of messages that were sent but never arrived. |
+| Duplicate | The same message arriving more than once. |
 
-Yayıncı ve abone aynı programda çalışır. İkisi de aynı saati kullandığı için gecikme mikrosaniye hassasiyetle ölçülür.
+Publisher and subscriber run in the same program. Since both use the same clock, latency is measured with microsecond precision.
 
-### Ağ senaryoları
+### Network scenarios
 
-Bilgisayarın kendi içindeki (localhost) ağ kusursuzdur. Bu ortamda üç QoS seviyesi arasında kayıp farkı görülmez. Bu yüzden `ag_simulatoru.py` istemcilerle broker arasına girer:
+The network inside one computer (localhost) is perfect. In this environment there is no difference in loss between the three QoS levels. That's why `network_simulator.py` sits between the clients and the broker:
 
-| Senaryo | Koşul |
+| Scenario | Condition |
 |---|---|
-| İdeal | Doğrudan bağlantı |
-| Gecikmeli | Her yönde 40 ± 10 ms gecikme (yavaş bir mobil ağ gibi) |
-| Kesintili | Gecikme + ortalama 3 sn'de bir bağlantının aniden kopması (Wi-Fi'nin gidip gelmesi gibi) |
+| Ideal | Direct connection |
+| Delayed | 40 ± 10 ms delay in each direction (like a slow mobile network) |
+| Unstable | Delay + a sudden connection drop every 3 s on average (like Wi-Fi coming and going) |
 
-MQTT, TCP üzerinde çalışır ve TCP tek tek kaybolan paketleri kendisi yeniden gönderir. Bu yüzden MQTT'de gerçek kayıp **bağlantı koptuğunda** oluşur; simülatör de kaybı bu şekilde yaratır.
-Aynı tekrardaki QoS 0, 1 ve 2 ölçümleri aynı rastgele tohumla, yani **aynı anlarda kopan bağlantılarla** yapılır; karşılaştırma adildir.
+MQTT runs over TCP, and TCP resends individually lost packets by itself. So in MQTT, real loss happens **when the connection drops**; the simulator creates loss the same way.
+The QoS 0, 1 and 2 measurements of the same repetition use the same random seed, i.e. **connections that drop at the same moments**; the comparison is fair.
 
-Deneyde MQTT 5 ve kalıcı oturum (persistent session) kullanılır. Bağlantı koptuğunda broker aboneliği ve teslim edilemeyen QoS 1/2 mesajlarını saklar. QoS'un vaat ettiği güvence ancak böyle çalışır.
+The experiment uses MQTT 5 and a persistent session. When the connection drops, the broker keeps the subscription and the undelivered QoS 1/2 messages. This is the only way the guarantee QoS promises actually works.
 
-### Çalıştırma
+### Running
 
-Ölçümün temiz olması için önce evin programlarını (`hepsini_baslat.py`, panel) kapatın. Broker'ı `-v` **olmadan** başlatın, çünkü binlerce satır log yazmak ölçümü yavaşlatır:
+For a clean measurement, first stop the home's programs (`start_all.py`, panel). Start the broker **without** `-v`, because writing thousands of log lines slows the measurement down:
 
 ```bash
 # Terminal 1
@@ -223,48 +228,48 @@ mosquitto -c mosquitto.conf
 
 # Terminal 2
 cd ~/akilli-ev-mqtt && source .venv/bin/activate
-pip install -r requirements.txt          # matplotlib için bir kez
-python qos_deneyi.py                     # ~7 dakika (3 senaryo × 3 QoS × 3 tekrar)
-python qos_grafik.py                     # grafikleri ve tabloyu üretir
+pip install -r requirements.txt          # once, for matplotlib
+python qos_experiment.py                 # ~7 minutes (3 scenarios × 3 QoS × 3 repetitions)
+python qos_plots.py                      # produces the plots and the table
 ```
 
-Seçenekler:
-- `python qos_deneyi.py --hizli`: 100 mesaj, 1 tekrar; yaklaşık 1 dakikada biter, denemek için.
-- `--mesaj 1000 --hiz 100 --tekrar 5`: daha uzun ve daha güvenilir ölçüm.
+Options:
+- `python qos_experiment.py --quick`: 100 messages, 1 repetition; finishes in about 1 minute, for trying it out.
+- `--messages 1000 --rate 100 --repeat 5`: a longer and more reliable measurement.
 
-### Çıktılar (`sonuclar/<tarih-saat>/`)
+### Outputs (`results/<date-time>/`)
 
-| Dosya | İçerik |
+| File | Content |
 |---|---|
-| `olcumler.csv` | Her mesaj için bir satır: senaryo, QoS, tekrar, sıra, ulaştı mı, gecikme, kopya sayısı |
-| `ozet.csv` | Her ölçüm için bir satır: kayıp, kopya, ortalama/medyan/p95/p99 gecikme, kopma sayısı |
-| `deney_bilgisi.json` | Deney parametreleri ve yazılım sürümleri (raporda "deney ortamı" için) |
-| `1_kayip_orani.png` | Senaryo ve QoS'a göre kayıp oranı |
-| `2_gecikme_dagilimi.png` | Gecikme dağılımı (kutu grafiği) |
-| `3_gecikme_cdf.png` | Mesajların yüzde kaçının ne kadar sürede ulaştığı; eğrinin tavanı kayıbı da gösterir |
-| `ozet.md` | Rapora kopyalanabilecek özet tablo |
+| `measurements.csv` | One row per message: scenario, QoS, repetition, sequence number, received or not, latency, duplicate count |
+| `summary.csv` | One row per measurement: loss, duplicates, mean/median/p95/p99 latency, number of disconnects |
+| `experiment_info.json` | Experiment parameters and software versions (for the "experimental setup" in a report) |
+| `1_loss_rate.png` | Loss rate by scenario and QoS |
+| `2_latency_distribution.png` | Latency distribution (box plot) |
+| `3_latency_cdf.png` | What share of messages arrived within how long; the curve's ceiling also shows the loss |
+| `summary.md` | Summary table that can be copied into a report |
 
-### Beklenen sonuçlar (ve nedenleri)
+### Expected results (and why)
 
 | | QoS 0 | QoS 1 | QoS 2 |
 |---|---|---|---|
-| Garanti | En fazla bir kez | En az bir kez | Tam olarak bir kez |
-| El sıkışma | Yok (PUBLISH) | 2 adım (PUBLISH → PUBACK) | 4 adım (PUBLISH → PUBREC → PUBREL → PUBCOMP) |
-| Gecikmeli ağda gecikme | ≈ 2 × tek yön gecikmesi | QoS 0 ile aynı (broker PUBACK'i beklemeden iletir) | ≈ 3 katı (broker mesajı PUBREL gelince iletir, abone tarafında da aynı) |
-| Kopmada kayıp | Var | Yok | Yok |
-| Kopmada kopya | Yok | **Olabilir** | Yok |
-| Kopmada gecikme kuyruğu | Yok (mesaj zaten kaybolur) | Uzun (yeniden bağlanmayı bekler) | Uzun |
+| Guarantee | At most once | At least once | Exactly once |
+| Handshake | None (PUBLISH) | 2 steps (PUBLISH → PUBACK) | 4 steps (PUBLISH → PUBREC → PUBREL → PUBCOMP) |
+| Latency on a delayed network | ≈ 2 × one-way delay | Same as QoS 0 (the broker forwards without waiting for the PUBACK) | ≈ 3 times as long (the broker forwards the message when PUBREL arrives, and the same happens on the subscriber side) |
+| Loss on disconnect | Yes | No | No |
+| Duplicates on disconnect | No | **Possible** | No |
+| Latency tail on disconnect | None (the message is simply lost) | Long (waits for the reconnect) | Long |
 
-### Deney sırasında bulunan bir sorun: QoS 2'de sessiz kayıp
+### A problem found during the experiment: silent loss with QoS 2
 
-İlk denemelerde QoS 2, kesintili ağda mesajların %14–26'sını **kaybetti**. QoS 2'nin garantisine göre bu olmamalıydı. Broker'ın ayrıntılı loglarında kaybolan her mesaj için şu satır görüldü:
+In the first trials, QoS 2 **lost** 14–26% of messages on the unstable network. According to QoS 2's guarantee this shouldn't happen. In the broker's verbose logs, this line appeared for every lost message:
 
 ```
-Sending PUBREC to deney-yayinci-... (m68, rc151)     ← 151 = 0x97 "Quota exceeded"
+Sending PUBREC to exp-pub-... (m68, rc151)     ← 151 = 0x97 "Quota exceeded"
 ```
 
-**Neden?** Mosquitto, varsayılan olarak bir istemcinin aynı anda en fazla **20** onay bekleyen QoS 1/2 mesajı göndermesine izin verir (`max_inflight_messages 20`). paho-mqtt 2.1.0, bağlantı kopup yeniden kurulunca biriken mesajların hepsini aynı anda gönderiyor. Kütüphanenin `_messages_reconnect_reset_out` fonksiyonunda sayacı artıran satır yorum satırı haline getirilmiş. Broker 20'yi aşan mesajları reddediyor; paho ise bu ret kodunu kontrol etmeden mesajı "teslim edildi" sayıyor. MQTT 3.1.1 ile deneyince sorun daha da büyüdü, çünkü bu sürümde broker reddi bildirecek bir koda sahip değil.
+**Why?** By default, Mosquitto lets a client have at most **20** QoS 1/2 messages awaiting acknowledgement at once (`max_inflight_messages 20`). paho-mqtt 2.1.0 sends all queued messages at once after a connection drops and is re-established: in the library's `_messages_reconnect_reset_out` function, the line that increments the counter is commented out. The broker rejects the messages beyond 20, and paho counts the message as "delivered" without checking this rejection code. With MQTT 3.1.1 the problem got even worse, because in that version the broker has no code to report the rejection.
 
-**Çözüm:** `mosquitto.conf` içinde `max_inflight_messages 0` (sınırsız). Bu ayarla QoS 2 tüm denemelerde **kayıpsız ve kopyasız** çalıştı.
+**Fix:** `max_inflight_messages 0` (unlimited) in `mosquitto.conf`. With this setting QoS 2 worked **without loss and without duplicates** in every trial.
 
-**Ders:** Protokolün verdiği garanti, ancak broker ve istemci kütüphanesi birbiriyle uyumlu çalıştığında geçerlidir. QoS 2 kullanmak tek başına "mesaj kaybolmaz" demek değildir; yapılandırma ve kütüphane davranışı da test edilmelidir.
+**Lesson:** The guarantee a protocol gives only holds when the broker and the client library work together correctly. Using QoS 2 does not by itself mean "messages are never lost"; the configuration and library behaviour must be tested too.

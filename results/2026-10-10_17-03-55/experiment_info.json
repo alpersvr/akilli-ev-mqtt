@@ -1,0 +1,36 @@
+{
+  "date": "2026-10-10T17:07:16",
+  "message_count": 500,
+  "rate_msg_per_s": 50,
+  "repetitions": 2,
+  "payload_size_bytes": 64,
+  "scenarios": [
+    {
+      "name": "ideal",
+      "description": "Direct connection (localhost)",
+      "network": null
+    },
+    {
+      "name": "delayed",
+      "description": "40 ± 10 ms delay in each direction",
+      "network": {
+        "delay_ms": 40,
+        "jitter_ms": 10,
+        "mean_disconnect_s": null
+      }
+    },
+    {
+      "name": "unstable",
+      "description": "40 ± 10 ms delay + a connection drop every 3 s on average",
+      "network": {
+        "delay_ms": 40,
+        "jitter_ms": 10,
+        "mean_disconnect_s": 3
+      }
+    }
+  ],
+  "mqtt_version": "5",
+  "paho_mqtt": "2.1.0",
+  "python": "3.15.0",
+  "operating_system": "macOS-15.7.4-arm64-arm-64bit-Mach-O"
+}
