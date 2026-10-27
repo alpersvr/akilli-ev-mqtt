@@ -24,7 +24,8 @@ const DISPLAY_NAME = {
 };
 
 const LOCALE = "en-GB";             // 24-hour clock, day/month dates
-const CHART_POINT_COUNT = 90;       // Readings kept in the chart (2 s apart = 3 min)
+const CHART_WINDOW_MS = 3 * 60 * 1000; // Time span shown in the chart (3 min)
+const TIME_TICK_MS = 60 * 1000;       // A time label on the chart every minute
 const LOG_ROW_COUNT = 150;          // Max rows kept in the log
 const SIMULATION_DURATION_MS = 4000; // Duration of a simulated motion/door event
 
@@ -70,8 +71,9 @@ async function start() {
   showEmptyLog();
   connect();
 
-  // Update the "x s ago" texts every second
-  setInterval(updateTimes, 1000);
+  // Every second: update the "x s ago" texts and slide the chart's time axis
+  setInterval(() => { updateTimes(); drawChart(); }, 1000);
+  bindChartHover();
   // Redraw the chart when the window is resized
   new ResizeObserver(drawChart).observe($("temperature-chart"));
 }
@@ -171,7 +173,8 @@ function onMessage(topic, payload, packet) {
       home.temperature = data.temperature;
       home.temperatureTime = time;
       home.history.push({ v: data.temperature, o: home.outdoorTemperature, a: home.ac, t: time });
-      if (home.history.length > CHART_POINT_COUNT) home.history.shift();
+      // drawChart() drops readings older than the chart window; this is just a safety limit
+      if (home.history.length > 1000) home.history.shift();
       break;
     case T.outdoor_temperature:
       if (typeof data.temperature !== "number") return;
@@ -320,31 +323,46 @@ function renderDevices() {
 // TEMPERATURE CHART (hand-drawn SVG, no library)
 // ============================================================
 
+let chartHoverX = null;  // Pointer position over the chart (px from the SVG's left edge), null = not hovering
+
 function drawChart() {
   const svg = $("temperature-chart");
   const w = svg.clientWidth, h = svg.clientHeight;  // width, height (pixels)
   if (!w || !C) return;
   svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
 
-  const pad = { left: 34, right: 8, top: 10, bottom: 30 };  // margins (time labels at the bottom)
-  const plotW = w - pad.left - pad.right;
-  const plotH = h - pad.top - pad.bottom;
-  const E = C.ac_thresholds;
-  const values = home.history.map((n) => n.v);
-  const outdoorValues = home.history.map((n) => n.o).filter((v) => typeof v === "number");
+  // The horizontal axis is real time: the left edge is 3 minutes ago, the right edge is now.
+  const now = Date.now();
+  const start = now - CHART_WINDOW_MS;
+  const interval = C.publish_interval_seconds * 1000;
+  const gap = interval * 3;  // Readings further apart than this = the sensor was silent; the line breaks there
 
-  if (values.length < 2) {
-    svg.innerHTML = `<text class="g-empty" x="${w / 2}" y="${h / 2}" text-anchor="middle">Waiting for readings to draw the chart…</text>`;
+  // Drop readings that slid off the left edge (keep one just outside so the line enters from the edge)
+  while (home.history.length > 1 && home.history[1].t < start) home.history.shift();
+  const history = home.history;
+
+  if (!history.some((n) => n.t >= start)) {
+    svg.innerHTML = `<text class="g-empty" x="${w / 2}" y="${h / 2}" text-anchor="middle">Waiting for temperature readings…</text>`;
+    hideChartTip();
     return;
   }
+
+  const pad = { left: 34, right: 10, top: 10, bottom: 30 };  // margins (time labels at the bottom)
+  const plotW = w - pad.left - pad.right;
+  const plotH = h - pad.top - pad.bottom;
+  const baseY = pad.top + plotH;
+  const E = C.ac_thresholds;
+  const values = history.map((n) => n.v);
+  const outdoorValues = history.map((n) => n.o).filter((v) => typeof v === "number");
 
   // Vertical axis range: cover the data, the outdoor temperature and the cooling thresholds
   const min = Math.floor(Math.min(...values, ...outdoorValues, E.cooling_stop) - 0.5);
   const max = Math.ceil(Math.max(...values, ...outdoorValues, E.cooling_start) + 0.5);
   const yPos = (v) => pad.top + plotH * (1 - (v - min) / (max - min));
-  const xPos = (i) => pad.left + (plotW * i) / (CHART_POINT_COUNT - 1);
+  const xPos = (t) => pad.left + (plotW * (t - start)) / CHART_WINDOW_MS;
 
-  let s = "";
+  // Anything drawn inside <g clip-path> is cut off at the plot edges (e.g. the point just left of the window)
+  let s = `<defs><clipPath id="plot-clip"><rect x="${pad.left}" y="0" width="${plotW}" height="${h}"/></clipPath></defs>`;
 
   // Horizontal grid lines and left axis labels
   const step = max - min > 8 ? 2 : 1;
@@ -352,6 +370,18 @@ function drawChart() {
     s += `<line class="g-grid" x1="${pad.left}" x2="${pad.left + plotW}" y1="${yPos(v)}" y2="${yPos(v)}"/>`;
     s += `<text class="g-axis-text" x="${pad.left - 6}" y="${yPos(v) + 4}" text-anchor="end">${v}°</text>`;
   }
+
+  // Time axis: a vertical grid line and an HH:MM label at the start of every minute.
+  // The label texts never change; they just slide to the left as time passes.
+  for (let t = Math.ceil(start / TIME_TICK_MS) * TIME_TICK_MS; t <= now; t += TIME_TICK_MS) {
+    const px = xPos(t);
+    s += `<line class="g-grid" x1="${px}" x2="${px}" y1="${pad.top}" y2="${baseY + 10}"/>`;
+    // Skip labels that would collide with the left axis or with "now"
+    if (px < pad.left + 18 || px > pad.left + plotW - 44) continue;
+    const clock = new Date(t).toLocaleTimeString(LOCALE, { hour: "2-digit", minute: "2-digit" });
+    s += `<text class="g-axis-text" x="${px}" y="${h - 2}" text-anchor="middle">${clock}</text>`;
+  }
+  s += `<text class="g-axis-text g-now" x="${pad.left + plotW}" y="${h - 2}" text-anchor="end">now</text>`;
 
   // Automation thresholds (those within range)
   const thresholds = [
@@ -371,44 +401,121 @@ function drawChart() {
     topLayer += `<text class="g-threshold-text" x="${pad.left + 6}" y="${yPos(v) - 4}">${text} (${v}°)</text>`;
   }
 
-  // Place the points so the newest reading is at the right edge
-  const offset = CHART_POINT_COUNT - values.length;
-  const points = home.history.map((n, i) => [xPos(i + offset), yPos(n.v)]);
+  let data = "";
 
-  const baseY = pad.top + plotH;
-
-  // The strip at the bottom: what the AC was doing at that moment
-  const stripW = plotW / (CHART_POINT_COUNT - 1) + 0.5;
-  home.history.forEach((n, i) => {
-    if (n.a === "cooling" || n.a === "heating") {
-      s += `<rect class="g-${n.a}" x="${xPos(i + offset) - stripW / 2}" y="${baseY + 3}" width="${stripW}" height="5"/>`;
-    }
+  // The strip at the bottom: what the AC was doing, from each reading until the next one
+  history.forEach((n, i) => {
+    if (n.a !== "cooling" && n.a !== "heating") return;
+    const next = history[i + 1];
+    const end = next && next.t - n.t <= gap ? next.t : Math.min(n.t + interval, now);
+    data += `<rect class="g-${n.a}" x="${xPos(n.t)}" y="${baseY + 3}" width="${Math.max(1, xPos(end) - xPos(n.t))}" height="5"/>`;
   });
 
-  // Horizontal axis: a time label every 30 readings (≈1 min), going back from the newest
-  for (let i = home.history.length - 1; i >= 0; i -= 30) {
-    const px = xPos(i + offset);
-    if (px < pad.left + 24) break;  // Don't collide with the left axis labels
-    const anchor = i === home.history.length - 1 ? "end" : "middle";
-    const clock = new Date(home.history[i].t).toLocaleTimeString(LOCALE, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-    s += `<text class="g-axis-text" x="${px}" y="${h - 2}" text-anchor="${anchor}">${clock}</text>`;
+  // Split the readings into runs without gaps; each run is drawn as its own line
+  const runs = [];
+  history.forEach((n, i) => {
+    if (i === 0 || n.t - history[i - 1].t > gap) runs.push([]);
+    runs.at(-1).push(n);
+  });
+  const linePath = (points) => points.map(([px, py], i) => `${i ? "L" : "M"}${px.toFixed(1)},${py.toFixed(1)}`).join("");
+
+  for (const run of runs) {
+    // Outdoor temperature: dashed line (it also breaks where there is no outdoor data)
+    let outdoorPath = "", penDown = false;
+    for (const n of run) {
+      if (typeof n.o !== "number") { penDown = false; continue; }
+      outdoorPath += `${penDown ? "L" : "M"}${xPos(n.t).toFixed(1)},${yPos(n.o).toFixed(1)}`;
+      penDown = true;
+    }
+    if (outdoorPath) data += `<path class="g-outdoor-line" d="${outdoorPath}"/>`;
+
+    // Living room temperature: light fill under the line, and the line itself
+    const points = run.map((n) => [xPos(n.t), yPos(n.v)]);
+    if (points.length === 1) {
+      data += `<circle class="g-point" cx="${points[0][0]}" cy="${points[0][1]}" r="2.5"/>`;
+      continue;
+    }
+    const path = linePath(points);
+    data += `<path class="g-area" d="${path}L${points.at(-1)[0]},${baseY}L${points[0][0]},${baseY}Z"/>`;
+    data += `<path class="g-line" d="${path}"/>`;
+  }
+  s += `<g clip-path="url(#plot-clip)">${data}</g>`;
+
+  // Hover: a vertical line at the reading nearest to the pointer, dots on both lines and a tooltip
+  const hovered = chartHoverX === null ? null : nearestReading(history, start + ((chartHoverX - pad.left) / plotW) * CHART_WINDOW_MS);
+  if (hovered && hovered.t >= start && Math.abs(xPos(hovered.t) - chartHoverX) <= (plotW * gap) / CHART_WINDOW_MS / 2) {
+    const px = xPos(hovered.t);
+    topLayer += `<line class="g-cursor" x1="${px}" x2="${px}" y1="${pad.top}" y2="${baseY}"/>`;
+    if (typeof hovered.o === "number") topLayer += `<circle class="g-dot outdoor" cx="${px}" cy="${yPos(hovered.o)}" r="4"/>`;
+    topLayer += `<circle class="g-dot" cx="${px}" cy="${yPos(hovered.v)}" r="4.5"/>`;
+    showChartTip(hovered, px, w);
+  } else {
+    hideChartTip();
   }
 
-  // Outdoor temperature: dashed line (the line breaks where there is no data)
-  let outdoorPath = "", penDown = false;
-  home.history.forEach((n, i) => {
-    if (typeof n.o !== "number") { penDown = false; return; }
-    outdoorPath += `${penDown ? "L" : "M"}${xPos(i + offset).toFixed(1)},${yPos(n.o).toFixed(1)}`;
-    penDown = true;
-  });
-  if (outdoorPath) s += `<path class="g-outdoor-line" d="${outdoorPath}"/>`;
-
-  // Light fill under the line, and the temperature line
-  const path = points.map(([px, py], i) => `${i ? "L" : "M"}${px.toFixed(1)},${py.toFixed(1)}`).join("");
-  s += `<path class="g-area" d="${path}L${points.at(-1)[0]},${baseY}L${points[0][0]},${baseY}Z"/>`;
-  s += `<path class="g-line" d="${path}"/>`;
-
   svg.innerHTML = s + topLayer;
+}
+
+function nearestReading(history, t) {
+  let best = null;
+  for (const n of history) {
+    if (!best || Math.abs(n.t - t) < Math.abs(best.t - t)) best = n;
+  }
+  return best;
+}
+
+/** Fills the tooltip next to the hovered reading. Built with textContent so message data is never read as HTML. */
+function showChartTip(n, px, w) {
+  const row = (cls, name, value) => {
+    const r = document.createElement("div");
+    r.className = `tip-row ${cls}`;
+    const k = document.createElement("span");
+    k.textContent = name;
+    const v = document.createElement("b");
+    v.textContent = value;
+    r.append(k, v);
+    return r;
+  };
+  const time = document.createElement("div");
+  time.className = "tip-time";
+  time.textContent = formatTime(n.t);
+
+  const tip = $("chart-tip");
+  tip.replaceChildren(
+    time,
+    row("tip-indoor", "Living room", `${n.v.toFixed(1)} °C`),
+    ...(typeof n.o === "number" ? [row("tip-outdoor", "Outdoor", `${n.o.toFixed(1)} °C`)] : []),
+    row("tip-ac", "AC", label(n.a)),
+  );
+  tip.hidden = false;
+  // Show the box on whichever side of the line has more room
+  tip.style.left = `${px}px`;
+  tip.style.transform = px > w / 2 ? "translateX(calc(-100% - 12px))" : "translateX(12px)";
+}
+
+function hideChartTip() {
+  $("chart-tip").hidden = true;
+}
+
+function bindChartHover() {
+  const svg = $("temperature-chart");
+  const move = (e) => {
+    chartHoverX = e.clientX - svg.getBoundingClientRect().left;
+    drawChart();
+  };
+  svg.addEventListener("pointermove", move);
+  svg.addEventListener("pointerdown", move);  // a tap on a touch screen
+  svg.addEventListener("pointerleave", (e) => {
+    // On touch screens the tooltip stays after lifting the finger, until a tap elsewhere
+    if (e.pointerType !== "mouse") return;
+    chartHoverX = null;
+    drawChart();
+  });
+  document.addEventListener("pointerdown", (e) => {
+    if (chartHoverX === null || e.composedPath().includes(svg)) return;
+    chartHoverX = null;
+    drawChart();
+  });
 }
 
 // ============================================================

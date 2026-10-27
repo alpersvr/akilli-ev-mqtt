@@ -182,7 +182,8 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 /* ---------- Climate card ---------- */
 .climate { display: flex; flex-wrap: wrap; gap: 24px; }
 .climate-summary { flex: 1 1 240px; max-width: 360px; }
-.chart-area { flex: 3 1 360px; min-width: 0; }
+/* position: relative so the tooltip can be placed over the chart */
+.chart-area { flex: 3 1 360px; min-width: 0; position: relative; }
 
 .big-value { font-size: 3.2rem; font-weight: 650; line-height: 1; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
 .big-value .unit { font-size: 1.4rem; color: var(--muted); margin-left: 4px; font-weight: 500; }
@@ -192,7 +193,8 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 #ac-state[data-state="cooling"] { color: var(--cold); }
 #ac-state[data-state="heating"] { color: var(--hot); }
 
-#temperature-chart { display: block; width: 100%; height: 200px; }
+/* touch-action: pan-y lets a finger slide sideways over the chart (to move the tooltip) while still scrolling the page vertically */
+#temperature-chart { display: block; width: 100%; height: 200px; touch-action: pan-y; }
 .g-grid { stroke: var(--line); stroke-width: 1; }
 .g-axis-text { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 .g-line { fill: none; stroke: var(--hot); stroke-width: 2.2; stroke-linejoin: round; stroke-linecap: round; }
@@ -204,6 +206,34 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .g-cooling { fill: var(--cold); opacity: 0.85; }
 .g-heating { fill: var(--hot); opacity: 0.85; }
 .g-empty { fill: var(--muted); font-size: 13px; }
+.g-now { fill: var(--text); font-weight: 600; }
+.g-point { fill: var(--hot); }
+.g-cursor { stroke: var(--muted); stroke-width: 1; }
+.g-dot { fill: var(--hot); stroke: var(--card); stroke-width: 2; }
+.g-dot.outdoor { fill: var(--muted); }
+
+/* Tooltip shown while hovering over the chart */
+.chart-tip {
+  position: absolute;
+  top: 4px;
+  min-width: 150px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.12);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;   /* keep "Living room 24.2 °C" on one line */
+  pointer-events: none;  /* the pointer "goes through" the box to the chart */
+}
+.chart-tip[hidden] { display: none; }
+.tip-time { font-weight: 600; margin-bottom: 4px; }
+.tip-row { display: flex; align-items: center; gap: 6px; }
+.tip-row span { color: var(--muted); flex: 1; }
+.tip-row::before { content: ""; width: 10px; flex: none; }
+.tip-indoor::before { height: 2px; background: var(--hot); }
+.tip-outdoor::before { border-top: 2px dashed var(--muted); }
 
 .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 8px; font-size: 0.8rem; color: var(--muted); }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }

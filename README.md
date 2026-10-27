@@ -152,7 +152,7 @@ Not required; the panel has an event log too.
 
 ## What's on the panel?
 
-- **Living room climate:** Current indoor and outdoor temperature with the time of the last reading, and a chart of the last 3 minutes. The chart shows the outdoor temperature (dashed line), the automation thresholds, the moments the AC was running (blue/orange strip at the bottom) and time labels along the bottom. The AC mode can be changed here.
+- **Living room climate:** Current indoor and outdoor temperature with the time of the last reading, and a chart of the last 3 minutes. The chart shows the outdoor temperature (dashed line), the automation thresholds and the moments the AC was running (blue/orange strip at the bottom). The time axis is real time: a label at the start of every minute, "now" at the right edge, and if the sensor goes silent the line breaks instead of joining distant readings. Hover over the chart (or tap it on a phone) to see the exact time, both temperatures and the AC state of a reading. The AC mode can be changed here.
 - **Lighting:** Turn the lamp on/off, motion state, how many seconds until the lamp turns off. The "Simulate motion" button publishes a 4 s motion event on behalf of the sensor.
 - **Security:** Arm / disarm the alarm, door state, "Simulate door opening".
 - **Devices:** Online/offline list built from Last Will messages. If you stop a device, a red "Offline" tag appears on its card.

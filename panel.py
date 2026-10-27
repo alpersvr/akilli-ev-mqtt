@@ -50,6 +50,7 @@ def panel_config():
             "heating_stop": config.AC_HEATING_STOP,
         },
         "lamp_off_delay": config.LAMP_OFF_DELAY,
+        "publish_interval_seconds": config.PUBLISH_INTERVAL_SECONDS,
     }
 
 
