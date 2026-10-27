@@ -106,6 +106,8 @@ pip install -r requirements.txt       # install paho-mqtt and matplotlib
 
 ## Running
 
+Open three terminals, in this order:
+
 **Terminal 1: Broker (with the project settings)**
 
 ```bash
@@ -115,21 +117,16 @@ mosquitto -c mosquitto.conf -v
 
 The Python programs also work without `-c mosquitto.conf`, but then the WebSocket port (9001) used by the panel is not opened.
 
-**Terminal 2: Monitor**
-
-```bash
-cd ~/akilli-ev-mqtt && source .venv/bin/activate
-python subscriber.py
-```
-
-**Terminal 3: The whole home**
+**Terminal 2: All devices and the automation**
 
 ```bash
 cd ~/akilli-ev-mqtt && source .venv/bin/activate
 python start_all.py
 ```
 
-**Terminal 4: Panel**
+This starts the lamp, AC, alarm, automation and the three sensors. You can also run them one by one if you like (`python lamp.py`, `python automation.py` ...). Each is independent.
+
+**Terminal 3: Panel**
 
 ```bash
 cd ~/akilli-ev-mqtt && source .venv/bin/activate
@@ -137,11 +134,21 @@ python panel.py
 ```
 
 The browser opens by itself. If it doesn't, type http://localhost:8000 in the address bar.
-The monitor in Terminal 2 is optional; the panel has an event log too.
 
-You can also run the programs one by one if you like (`python lamp.py`, `python automation.py` ...). Each is independent.
+**Terminal 4 (optional): Watch the messages in the terminal**
 
-To stop, press **Ctrl+C** in the relevant terminal.
+```bash
+cd ~/akilli-ev-mqtt && source .venv/bin/activate
+python subscriber.py
+```
+
+Not required; the panel has an event log too.
+
+### Stopping and restarting
+
+- To stop, press **Ctrl+C** in each terminal. Every device publishes `offline` as it shuts down.
+- After changing the code or `config.py`, stop the programs with Ctrl+C and start them again; running programs keep using the old code. Restart `panel.py` too, then reload the page (Cmd+R).
+- Retained messages live only in the broker's memory (`mosquitto.conf` enables no persistence). Restarting the broker clears all saved states.
 
 ## What's on the panel?
 
@@ -219,10 +226,10 @@ The experiment uses MQTT 5 and a persistent session. When the connection drops, 
 
 ### Running
 
-For a clean measurement, first stop the home's programs (`start_all.py`, panel). Start the broker **without** `-v`, because writing thousands of log lines slows the measurement down:
+For a clean measurement, first stop the home's programs (`start_all.py`, panel, subscriber) with Ctrl+C. Restart the broker **without** `-v`, because writing thousands of log lines slows the measurement down:
 
 ```bash
-# Terminal 1
+# Terminal 1 (stop the old broker with Ctrl+C first)
 cd ~/akilli-ev-mqtt
 mosquitto -c mosquitto.conf
 
@@ -234,7 +241,7 @@ python qos_plots.py                      # produces the plots and the table
 ```
 
 Options:
-- `python qos_experiment.py --quick`: 100 messages, 1 repetition; finishes in about 1 minute, for trying it out.
+- `python qos_experiment.py --quick`: 100 messages, 1 repetition; finishes in about 30 seconds, for trying it out.
 - `--messages 1000 --rate 100 --repeat 5`: a longer and more reliable measurement.
 
 ### Outputs (`results/<date-time>/`)
