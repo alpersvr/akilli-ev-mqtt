@@ -35,6 +35,7 @@ Eyleyiciler komutu uygulayıp yeni durumlarını yayınlar.
 | Topic | Kim yayınlar | Örnek içerik |
 |---|---|---|
 | `ev/salon/sicaklik` | Sıcaklık sensörü | `{"sicaklik": 24.5, "birim": "C", ...}` |
+| `ev/dis/sicaklik` | Sıcaklık sensörü (dış ortam) | `{"sicaklik": 30.2, "birim": "C", ...}` |
 | `ev/salon/hareket` | Hareket sensörü | `{"durum": "var"}` / `"yok"` |
 | `ev/giris/kapi` | Kapı sensörü | `{"durum": "acik"}` / `"kapali"` |
 | `ev/salon/lamba` | Lamba | `{"durum": "acik"}` / `"kapali"` |
@@ -71,7 +72,7 @@ Bu sayede ekranda kapalı döngü bir termostat davranışı görülür. Tüm e�
 | `ayarlar.py` | Broker adresi, topic adları, olasılıklar, kural eşikleri. **Tüm ayarlar burada.** |
 | `ortak.py` | Herkesin kullandığı yardımcılar: istemci oluşturma, JSON gönderme/çözme, ana döngü, düzgün kapanış. |
 | `eyleyici.py` | Lamba/klima/alarm için ortak şablon (sınıf): komut dinle → durumu değiştir → durumu yayınla. |
-| `sicaklik_sensoru.py` | 2 sn'de bir sıcaklık yayınlar. Klimanın etkisini simüle eder. |
+| `sicaklik_sensoru.py` | 2 sn'de bir salon ve dış ortam sıcaklığını yayınlar. Klimanın etkisini simüle eder. |
 | `hareket_sensoru.py` | Rastgele zamanlarda "biri odaya girdi" olayı üretir. |
 | `kapi_sensoru.py` | Rastgele zamanlarda kapının açılıp kapanmasını üretir. |
 | `lamba.py` | Sanal lamba (açık/kapalı). |

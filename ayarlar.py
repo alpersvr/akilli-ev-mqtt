@@ -42,6 +42,7 @@ QOS = 1
 
 # Sensörler (sadece veri yayınlar)
 SICAKLIK_TOPIC = "ev/salon/sicaklik"
+DIS_SICAKLIK_TOPIC = "ev/dis/sicaklik"
 HAREKET_TOPIC = "ev/salon/hareket"
 KAPI_TOPIC = "ev/giris/kapi"
 
@@ -69,10 +70,14 @@ ABONE_TOPIC = "ev/#"
 # Sıcaklık sensörünün kaç saniyede bir ölçüm göndereceği.
 YAYIN_ARALIGI_SANIYE = 2
 
-# Klima kapalıyken oda sıcaklığı yavaş yavaş bu değere yaklaşır.
+# Dış ortam sıcaklığının ortalaması. Sensör dış sıcaklığı bu değerin
+# etrafında yavaşça oynatır; klima kapalıyken oda dış sıcaklığa yaklaşır.
 # 30 = yaz senaryosu (klima soğutur). 12 yaparsanız kış senaryosu
 # olur ve klimanın ısıtmaya geçtiğini görürsünüz.
 DIS_SICAKLIK = 30.0
+
+# Dış sıcaklık ortalamadan en fazla bu kadar (°C) sapabilir.
+DIS_SICAKLIK_SAPMA = 3.0
 
 # Her saniye için "biri odaya girdi" olasılığı (0.05 = %5).
 HAREKET_OLASILIGI = 0.05

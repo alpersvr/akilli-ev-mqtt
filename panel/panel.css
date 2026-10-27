@@ -187,6 +187,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .buyuk-deger { font-size: 3.2rem; font-weight: 650; line-height: 1; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
 .buyuk-deger .birim { font-size: 1.4rem; color: var(--soluk); margin-left: 4px; font-weight: 500; }
 .iklim-ozet .satir-baslik { margin-top: 18px; }
+.iklim-ozet .dis-satir { margin-top: 12px; }
 
 #klima-durum[data-durum="sogutma"] { color: var(--soguk); }
 #klima-durum[data-durum="isitma"] { color: var(--sicak); }
@@ -196,6 +197,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .g-eksen-yazi { fill: var(--soluk); font-size: 11px; font-variant-numeric: tabular-nums; }
 .g-cizgi { fill: none; stroke: var(--sicak); stroke-width: 2.2; stroke-linejoin: round; stroke-linecap: round; }
 .g-alan { fill: var(--sicak); opacity: 0.1; }
+.g-dis-cizgi { fill: none; stroke: var(--soluk); stroke-width: 1.6; stroke-dasharray: 5 3; stroke-linejoin: round; }
 .g-esik { stroke: var(--soluk); stroke-width: 1; stroke-dasharray: 4 4; }
 /* Yazının etrafına kart renginde ince bir kenar: çizgilerin üstünde bile okunur */
 .g-esik-yazi { fill: var(--soluk); font-size: 11px; paint-order: stroke; stroke: var(--kart); stroke-width: 4px; stroke-linejoin: round; }
@@ -207,6 +209,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .lejant span { display: inline-flex; align-items: center; gap: 6px; }
 .lejant i { display: inline-block; }
 .lj-cizgi { width: 16px; height: 2px; background: var(--sicak); }
+.lj-cizgi.dis { background: none; border-top: 2px dashed var(--soluk); height: 0; }
 .lj-blok { width: 12px; height: 6px; border-radius: 2px; }
 .lj-blok.sogutma { background: var(--soguk); }
 .lj-blok.isitma { background: var(--sicak); }

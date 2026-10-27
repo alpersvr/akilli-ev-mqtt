@@ -34,11 +34,18 @@
           <div class="buyuk-deger"><span id="sicaklik-deger">--</span><span class="birim">°C</span></div>
           <p class="soluk kucuk" id="sicaklik-zaman">Veri bekleniyor…</p>
 
+          <div class="satir-baslik dis-satir">
+            <span class="etiket">Dış ortam</span>
+            <span class="durum-yazi"><span id="dis-sicaklik-deger">--</span> °C</span>
+          </div>
+          <p class="soluk kucuk" id="dis-sicaklik-zaman"></p>
+
           <div class="satir-baslik">
             <span class="etiket">Klima</span>
             <span id="klima-durum" class="durum-yazi">—</span>
             <span class="cevrimdisi-etiket" data-cevrim="klima" hidden>Çevrimdışı</span>
           </div>
+          <p class="soluk kucuk" data-zaman="klima"></p>
           <div class="segment" role="group" aria-label="Klima modu">
             <button type="button" data-cihaz="klima" data-durum="kapali">Kapalı</button>
             <button type="button" data-cihaz="klima" data-durum="sogutma">Soğutma</button>
@@ -50,7 +57,8 @@
         <div class="grafik-alani">
           <svg id="sicaklik-grafik" role="img" aria-label="Son ölçümlerin sıcaklık grafiği"></svg>
           <div class="lejant">
-            <span><i class="lj-cizgi"></i>Sıcaklık</span>
+            <span><i class="lj-cizgi"></i>Salon</span>
+            <span><i class="lj-cizgi dis"></i>Dış ortam</span>
             <span><i class="lj-blok sogutma"></i>Klima soğutuyor</span>
             <span><i class="lj-blok isitma"></i>Klima ısıtıyor</span>
             <span><i class="lj-esik"></i>Otomasyon eşiği</span>
@@ -70,6 +78,7 @@
             <span class="cevrimdisi-etiket" data-cevrim="lamba" hidden>Çevrimdışı</span>
           </div>
           <div id="lamba-durum" class="durum-yazi buyuk">—</div>
+          <p class="soluk kucuk" data-zaman="lamba"></p>
         </div>
       </div>
       <button type="button" id="lamba-dugme" class="dugme ana">Aç</button>
@@ -92,6 +101,7 @@
         <span id="alarm-durum" class="durum-yazi buyuk">—</span>
         <span class="cevrimdisi-etiket" data-cevrim="alarm" hidden>Çevrimdışı</span>
       </div>
+      <p class="soluk kucuk" data-zaman="alarm"></p>
       <div class="segment" role="group" aria-label="Alarm">
         <button type="button" data-cihaz="alarm" data-durum="kurulu">Kur</button>
         <button type="button" data-cihaz="alarm" data-durum="devre_disi">Devre dışı bırak</button>
@@ -103,6 +113,7 @@
         <span id="kapi-durum" class="durum-yazi">—</span>
         <span class="cevrimdisi-etiket" data-cevrim="kapi" hidden>Çevrimdışı</span>
       </div>
+      <p class="soluk kucuk" data-zaman="kapi"></p>
       <button type="button" class="dugme sim" data-sim="kapi">Kapı açılmasını simüle et</button>
     </section>
 

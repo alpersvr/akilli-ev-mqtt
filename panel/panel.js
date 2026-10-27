@@ -33,13 +33,16 @@ let client = null;  // MQTT istemcisi
 const ev = {
   sicaklik: null,
   sicaklikZamani: null,
-  gecmis: [],          // [{ v: sıcaklık, k: o andaki klima durumu }]
+  disSicaklik: null,
+  disSicaklikZamani: null,
+  gecmis: [],          // [{ v: sıcaklık, d: dış sıcaklık, k: klima durumu, t: ölçüm zamanı (ms) }]
   klima: null,
   lamba: null,
   hareket: null,
   hareketZamani: null, // Hareket durumunun son değiştiği an
   kapi: null,
   alarm: null,
+  zamanlar: {},        // { klima: ms, lamba: ms, ... } durum mesajının cihazda üretildiği an
   cihazlar: {},        // { cihaz_id: "cevrimici" | "cevrimdisi" }
   topicCihaz: {},      // { topic: o topic'e yayın yapan cihaz_id }
 };
@@ -155,21 +158,31 @@ function mesajGeldi(topic, payload, paket) {
   // Bu topic'e hangi cihazın yayın yaptığını not et (çevrimdışı uyarısı için)
   if (veri.cihaz_id) ev.topicCihaz[topic] = veri.cihaz_id;
 
+  // Mesajın cihazda üretildiği an (yoksa geliş anı). Kayıtlı (retain)
+  // mesajlarda bu, sayfanın açıldığı an değil, durumun gerçekten değiştiği andır.
+  const zaman = mesajZamani(veri);
+
   const T = A.topicler;
   switch (topic) {
     case T.sicaklik:
       if (typeof veri.sicaklik !== "number") return;
       ev.sicaklik = veri.sicaklik;
-      ev.sicaklikZamani = Date.now();
-      ev.gecmis.push({ v: veri.sicaklik, k: ev.klima });
+      ev.sicaklikZamani = zaman;
+      ev.gecmis.push({ v: veri.sicaklik, d: ev.disSicaklik, k: ev.klima, t: zaman });
       if (ev.gecmis.length > GRAFIK_NOKTA_SAYISI) ev.gecmis.shift();
       break;
-    case T.klima:  ev.klima = veri.durum; break;
-    case T.lamba:  ev.lamba = veri.durum; break;
-    case T.kapi:   ev.kapi = veri.durum; break;
-    case T.alarm:  ev.alarm = veri.durum; break;
+    case T.dis_sicaklik:
+      if (typeof veri.sicaklik !== "number") return;
+      ev.disSicaklik = veri.sicaklik;
+      ev.disSicaklikZamani = zaman;
+      break;
+    case T.klima:  ev.klima = veri.durum; ev.zamanlar.klima = zaman; break;
+    case T.lamba:  ev.lamba = veri.durum; ev.zamanlar.lamba = zaman; break;
+    case T.kapi:   ev.kapi = veri.durum;  ev.zamanlar.kapi = zaman;  break;
+    case T.alarm:  ev.alarm = veri.durum; ev.zamanlar.alarm = zaman; break;
     case T.hareket:
-      if (veri.durum !== ev.hareket && !paket.retain) ev.hareketZamani = Date.now();
+      // Kayıtlı mesajın zamanı da gerçek değişim anıdır; sayfa yeni açılınca da gösterilebilir
+      if (veri.durum !== ev.hareket) ev.hareketZamani = zaman;
       ev.hareket = veri.durum;
       break;
     default:
@@ -177,6 +190,21 @@ function mesajGeldi(topic, payload, paket) {
   }
   ciz();
   cevrimDurumlariniCiz();
+}
+
+/** Mesajdaki "zaman" alanını (ör. 2026-10-10T16:10:46) milisaniyeye çevirir. */
+function mesajZamani(veri) {
+  // Saat dilimi yazmayan ISO metni tarayıcı yerel saat olarak yorumlar (Python tarafı da yerel saat)
+  const ms = typeof veri?.zaman === "string" ? Date.parse(veri.zaman) : NaN;
+  return Number.isNaN(ms) ? Date.now() : ms;
+}
+
+/** ms -> "16:10:46"; bugün değilse başına gün.ay eklenir: "10.10 16:10:46" */
+function saatYaz(ms) {
+  const t = new Date(ms);
+  const saat = t.toLocaleTimeString("tr-TR");
+  if (t.toDateString() === new Date().toDateString()) return saat;
+  return t.toLocaleDateString("tr-TR", { day: "2-digit", month: "2-digit" }) + " " + saat;
 }
 
 function jsonCoz(metin) {
@@ -195,6 +223,7 @@ function jsonCoz(metin) {
 function ciz() {
   // Sıcaklık ve klima
   $("sicaklik-deger").textContent = ev.sicaklik === null ? "--" : ev.sicaklik.toFixed(1);
+  $("dis-sicaklik-deger").textContent = ev.disSicaklik === null ? "--" : ev.disSicaklik.toFixed(1);
   durumYaz("klima-durum", ev.klima);
   segmentiIsaretle("klima", ev.klima);
 
@@ -231,15 +260,24 @@ function segmentiIsaretle(cihaz, durum) {
 
 function sureleriGuncelle() {
   $("sicaklik-zaman").textContent = ev.sicaklikZamani
-    ? `Son ölçüm ${kacSaniyeOnce(ev.sicaklikZamani)}`
+    ? `Son ölçüm ${saatYaz(ev.sicaklikZamani)} · ${kacSaniyeOnce(ev.sicaklikZamani)}`
     : "Veri bekleniyor…";
+  $("dis-sicaklik-zaman").textContent = ev.disSicaklikZamani
+    ? `Son ölçüm ${saatYaz(ev.disSicaklikZamani)} · ${kacSaniyeOnce(ev.disSicaklikZamani)}`
+    : "";
+
+  // Eyleyici ve kapı kartlarındaki "son değişim" satırları
+  document.querySelectorAll("[data-zaman]").forEach((el) => {
+    const z = ev.zamanlar[el.dataset.zaman];
+    el.textContent = z ? `Son güncelleme ${saatYaz(z)} · ${kacSaniyeOnce(z)}` : "";
+  });
 
   let hareketMetni = "";
   if (ev.hareketZamani && ev.hareket === "var") {
-    hareketMetni = `${kacSaniyeOnce(ev.hareketZamani)} başladı`;
+    hareketMetni = `${saatYaz(ev.hareketZamani)} · ${kacSaniyeOnce(ev.hareketZamani)} başladı`;
   } else if (ev.hareketZamani && ev.hareket === "yok") {
     const kalan = A.lamba_kapanma_suresi - Math.floor((Date.now() - ev.hareketZamani) / 1000);
-    hareketMetni = `Son hareket ${kacSaniyeOnce(ev.hareketZamani)}`;
+    hareketMetni = `Son hareket ${saatYaz(ev.hareketZamani)} · ${kacSaniyeOnce(ev.hareketZamani)}`;
     if (ev.lamba === "acik" && kalan > 0) hareketMetni += ` · lamba ~${kalan} sn sonra kapanacak`;
   }
   $("hareket-zaman").textContent = hareketMetni;
@@ -249,7 +287,9 @@ function kacSaniyeOnce(zaman) {
   const sn = Math.max(0, Math.round((Date.now() - zaman) / 1000));
   if (sn < 2) return "az önce";
   if (sn < 60) return `${sn} sn önce`;
-  return `${Math.floor(sn / 60)} dk önce`;
+  if (sn < 3600) return `${Math.floor(sn / 60)} dk önce`;
+  if (sn < 86400) return `${Math.floor(sn / 3600)} sa önce`;
+  return `${Math.floor(sn / 86400)} gün önce`;
 }
 
 /** Bir sensör/cihaz çevrimdışıysa kartındaki küçük kırmızı etiketi gösterir. */
@@ -283,20 +323,21 @@ function grafikCiz() {
   if (!g || !A) return;
   svg.setAttribute("viewBox", `0 0 ${g} ${y}`);
 
-  const pay = { sol: 34, sag: 8, ust: 10, alt: 16 };  // kenar boşlukları
+  const pay = { sol: 34, sag: 8, ust: 10, alt: 30 };  // kenar boşlukları (altta saat yazıları)
   const cizimG = g - pay.sol - pay.sag;
   const cizimY = y - pay.ust - pay.alt;
   const E = A.klima_esikleri;
   const degerler = ev.gecmis.map((n) => n.v);
+  const disDegerler = ev.gecmis.map((n) => n.d).filter((v) => typeof v === "number");
 
   if (degerler.length < 2) {
     svg.innerHTML = `<text class="g-bos" x="${g / 2}" y="${y / 2}" text-anchor="middle">Grafik için ölçümler bekleniyor…</text>`;
     return;
   }
 
-  // Dikey eksen aralığı: veriyi ve soğutma eşiklerini kapsasın
-  const enAz = Math.floor(Math.min(...degerler, E.sogutma_dur) - 0.5);
-  const enCok = Math.ceil(Math.max(...degerler, E.sogutma_basla) + 0.5);
+  // Dikey eksen aralığı: veriyi, dış sıcaklığı ve soğutma eşiklerini kapsasın
+  const enAz = Math.floor(Math.min(...degerler, ...disDegerler, E.sogutma_dur) - 0.5);
+  const enCok = Math.ceil(Math.max(...degerler, ...disDegerler, E.sogutma_basla) + 0.5);
   const yKoord = (v) => pay.ust + cizimY * (1 - (v - enAz) / (enCok - enAz));
   const xKoord = (i) => pay.sol + (cizimG * i) / (GRAFIK_NOKTA_SAYISI - 1);
 
@@ -331,17 +372,36 @@ function grafikCiz() {
   const kayma = GRAFIK_NOKTA_SAYISI - degerler.length;
   const noktalar = ev.gecmis.map((n, i) => [xKoord(i + kayma), yKoord(n.v)]);
 
+  const tabanY = pay.ust + cizimY;
+
   // Alttaki şerit: klimanın o anda ne yaptığı
   const seritG = cizimG / (GRAFIK_NOKTA_SAYISI - 1) + 0.5;
   ev.gecmis.forEach((n, i) => {
     if (n.k === "sogutma" || n.k === "isitma") {
-      s += `<rect class="g-${n.k}" x="${xKoord(i + kayma) - seritG / 2}" y="${y - 6}" width="${seritG}" height="5"/>`;
+      s += `<rect class="g-${n.k}" x="${xKoord(i + kayma) - seritG / 2}" y="${tabanY + 3}" width="${seritG}" height="5"/>`;
     }
   });
 
+  // Yatay eksen: en yeni ölçümden geriye doğru her 30 ölçümde (≈1 dk) bir saat yazısı
+  for (let i = ev.gecmis.length - 1; i >= 0; i -= 30) {
+    const px = xKoord(i + kayma);
+    if (px < pay.sol + 24) break;  // Sol eksen yazılarıyla çakışmasın
+    const hiza = i === ev.gecmis.length - 1 ? "end" : "middle";
+    const saat = new Date(ev.gecmis[i].t).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    s += `<text class="g-eksen-yazi" x="${px}" y="${y - 2}" text-anchor="${hiza}">${saat}</text>`;
+  }
+
+  // Dış sıcaklık: kesikli çizgi (veri gelmemiş noktalarda çizgi kesilir)
+  let disYol = "", kalemInik = false;
+  ev.gecmis.forEach((n, i) => {
+    if (typeof n.d !== "number") { kalemInik = false; return; }
+    disYol += `${kalemInik ? "L" : "M"}${xKoord(i + kayma).toFixed(1)},${yKoord(n.d).toFixed(1)}`;
+    kalemInik = true;
+  });
+  if (disYol) s += `<path class="g-dis-cizgi" d="${disYol}"/>`;
+
   // Çizginin altındaki hafif dolgu ve sıcaklık çizgisi
   const yol = noktalar.map(([px, py], i) => `${i ? "L" : "M"}${px.toFixed(1)},${py.toFixed(1)}`).join("");
-  const tabanY = pay.ust + cizimY;
   s += `<path class="g-alan" d="${yol}L${noktalar.at(-1)[0]},${tabanY}L${noktalar[0][0]},${tabanY}Z"/>`;
   s += `<path class="g-cizgi" d="${yol}"/>`;
 
@@ -354,7 +414,8 @@ function grafikCiz() {
 
 function gunlugeEkle(topic, metin, veri, kayitli) {
   // Sıcaklık 2 sn'de bir geldiği için istenmedikçe günlüğü kalabalıklaştırmasın
-  if (topic === A.topicler.sicaklik && !$("sicaklik-goster").checked) return;
+  const olcumMu = topic === A.topicler.sicaklik || topic === A.topicler.dis_sicaklik;
+  if (olcumMu && !$("sicaklik-goster").checked) return;
 
   const komutMu = topic.endsWith(A.komut_eki);
   let icerik;
@@ -369,7 +430,11 @@ function gunlugeEkle(topic, metin, veri, kayitli) {
   li.dataset.tur = komutMu ? "komut" : "durum";
   li.innerHTML = `<time></time><code></code><span class="icerik"></span>`;
   // textContent kullanıyoruz: mesaj içeriği HTML olarak yorumlanmasın (güvenlik)
-  li.querySelector("time").textContent = new Date().toLocaleTimeString("tr-TR");
+  // Gösterilen saat, mesajın cihazda üretildiği andır (kayıtlı mesajlarda gerçek değişim anı)
+  const zaman = new Date(mesajZamani(veri));
+  li.querySelector("time").textContent = zaman.toLocaleTimeString("tr-TR");
+  li.querySelector("time").dateTime = zaman.toISOString();
+  li.querySelector("time").title = zaman.toLocaleString("tr-TR");
   li.querySelector("code").textContent = topic;
   li.querySelector(".icerik").textContent = icerik;
   if (kayitli) {

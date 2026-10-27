@@ -35,6 +35,7 @@ def panel_ayarlari():
         "abone_topic": ayarlar.ABONE_TOPIC,
         "topicler": {
             "sicaklik": ayarlar.SICAKLIK_TOPIC,
+            "dis_sicaklik": ayarlar.DIS_SICAKLIK_TOPIC,
             "hareket": ayarlar.HAREKET_TOPIC,
             "kapi": ayarlar.KAPI_TOPIC,
             "lamba": ayarlar.LAMBA_TOPIC,
